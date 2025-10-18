@@ -6,30 +6,13 @@
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.0.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
 [![IsaacLab](https://img.shields.io/badge/IsaacLab-2.2.0-silver.svg)](https://isaac-sim.github.io/IsaacLab/main/index.html)
 [![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
-[![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/20.04/)
 [![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
 ## Prerequisites
 
-This project requires Isaac Sim and Isaac Lab installed via pip. If you haven't installed them yet:
+This project requires Isaac Sim and Isaac Lab installed via pip. If you haven't installed them yet, pleanse follow the instructions in [Isaac Lab Installation Guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)
 
-```bash
-# Create and activate a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install PyTorch (CUDA 12.x)
-pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
-
-# Install Isaac Sim
-pip install "isaacsim[all,extscache]==5.0.0" --extra-index-url https://pypi.nvidia.com
-
-# Install Isaac Lab
-pip install "isaaclab[isaacsim,all]==2.2.0" --extra-index-url https://pypi.nvidia.com
-
-# Install additional dependencies
-pip install skrl tensorboard
-```
 
 ## Setup
 

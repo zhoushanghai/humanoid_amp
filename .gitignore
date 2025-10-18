@@ -1,3 +1,6 @@
 **/__pycache__/
 *.pyc
 *.html
+logs/
+outputs/*
+*.egg-info

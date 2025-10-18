@@ -2,8 +2,7 @@
 # Sync skrl train/play scripts from Isaac Lab releases and reapply local tweaks.
 set -euo pipefail
 
-VERSION="${1:-2.2.0}"
-BASE_URL="https://raw.githubusercontent.com/isaac-sim/IsaacLab/v${VERSION}/scripts/reinforcement_learning/skrl"
+BASE_URL="https://raw.githubusercontent.com/isaac-sim/IsaacLab/main/scripts/reinforcement_learning/skrl"
 FILES=(train.py play.py)
 
 fetch() {
