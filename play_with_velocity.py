@@ -104,6 +104,12 @@ parser.add_argument(
     default=0,
     help="Environment ID to log velocity for (when num_envs > 1).",
 )
+parser.add_argument(
+    "--target_velocity",
+    type=float,
+    default=None,
+    help="Target velocity to set for the environment (m/s).",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -181,9 +187,12 @@ else:
 class VelocityLogger:
     """Class to log and plot robot velocities."""
 
-    def __init__(self, save_dir: str, env_id: int = 0):
+    def __init__(
+        self, save_dir: str, env_id: int = 0, target_velocity: float | None = None
+    ):
         self.save_dir = save_dir
         self.env_id = env_id
+        self.target_velocity = target_velocity
         os.makedirs(save_dir, exist_ok=True)
 
         # Data storage
@@ -331,6 +340,14 @@ class VelocityLogger:
             linewidth=1.5,
             label=f"Average: {avg_speed:.2f} m/s",
         )
+        if self.target_velocity is not None:
+            ax3.axhline(
+                y=self.target_velocity,
+                color="red",
+                linestyle="--",
+                linewidth=1.5,
+                label=f"Target: {self.target_velocity:.2f} m/s",
+            )
         ax3.legend(loc="upper right")
 
         plt.tight_layout()
@@ -438,6 +455,14 @@ def main(
     )
     env_cfg.seed = experiment_cfg["seed"]
 
+    # Set target velocity if specified
+    if args_cli.target_velocity is not None:
+        print(f"[INFO] Setting target velocity to {args_cli.target_velocity} m/s")
+        # Initialize min and max to the same value to force a specific velocity
+        env_cfg.min_velocity = args_cli.target_velocity
+        env_cfg.max_velocity = args_cli.target_velocity
+        env_cfg.target_velocity = args_cli.target_velocity
+
     # specify directory for logging experiments (load checkpoint)
     log_root_path = os.path.join(
         "logs", "skrl", experiment_cfg["agent"]["experiment"]["directory"]
@@ -517,7 +542,11 @@ def main(
     save_dir = (
         os.path.join(log_dir, args_cli.save_dir) if log_dir else args_cli.save_dir
     )
-    velocity_logger = VelocityLogger(save_dir=save_dir, env_id=args_cli.env_id)
+    velocity_logger = VelocityLogger(
+        save_dir=save_dir,
+        env_id=args_cli.env_id,
+        target_velocity=args_cli.target_velocity,
+    )
 
     print(f"[INFO] Will log velocity data for environment {args_cli.env_id}")
     print(f"[INFO] Will run for {args_cli.max_steps} steps")

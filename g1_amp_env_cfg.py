@@ -30,14 +30,16 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     rew_joint_acc_l2 = -0.00
     rew_joint_vel_l2 = -0.00
     rew_velocity = 1.0  # velocity tracking reward scale
-    target_velocity = 1.0  # target forward velocity (m/s)
+    target_velocity = 1.0  # default target forward velocity (m/s)
+    min_velocity = 0.0  # minimum random target velocity (m/s)
+    max_velocity = 1.0  # maximum random target velocity (m/s)
 
     # env
     episode_length_s = 10.0
     decimation = 2
 
     # spaces
-    observation_space = 71 + 3 * 10  # TODO
+    observation_space = 71 + 3 * 10 + 1  # Added 1 for target velocity
     action_space = 29
     state_space = 0
     num_amp_observations = 2

@@ -81,6 +81,11 @@ class G1AmpEnv(DirectRLEnv):
             device=self.device,
         )
 
+        # target velocity
+        self.target_velocities = torch.full(
+            (self.num_envs, 1), self.cfg.target_velocity, device=self.device
+        )
+
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
         # add ground plane
@@ -132,7 +137,10 @@ class G1AmpEnv(DirectRLEnv):
             "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
         }
 
-        return {"policy": obs}
+        # policy observation includes target velocity
+        policy_obs = torch.cat([obs, self.target_velocities], dim=-1)
+
+        return {"policy": policy_obs}
 
     # def _get_rewards(self) -> torch.Tensor:
     #     return torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
@@ -144,7 +152,7 @@ class G1AmpEnv(DirectRLEnv):
             self.cfg.rew_joint_acc_l2,
             self.cfg.rew_joint_vel_l2,
             self.cfg.rew_velocity,
-            self.cfg.target_velocity,
+            self.target_velocities,
             self.reset_terminated,
             self.actions,
             self.robot.data.joint_pos,
@@ -168,10 +176,15 @@ class G1AmpEnv(DirectRLEnv):
         return died, time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
-        if env_ids is None or len(env_ids) == self.num_envs:
-            env_ids = self.robot._ALL_INDICES
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
+
+        # random target velocity
+        self.target_velocities[env_ids] = (
+            torch.rand((len(env_ids), 1), device=self.device)
+            * (self.cfg.max_velocity - self.cfg.min_velocity)
+            + self.cfg.min_velocity
+        )
 
         if self.cfg.reset_strategy == "default":
             root_state, joint_pos, joint_vel = self._reset_strategy_default(env_ids)
@@ -322,7 +335,7 @@ def compute_rewards(
     rew_scale_joint_acc_l2: float,
     rew_scale_joint_vel_l2: float,
     rew_scale_velocity: float,
-    target_velocity: float,
+    target_velocities: torch.Tensor,
     reset_terminated: torch.Tensor,
     actions: torch.Tensor,
     joint_pos: torch.Tensor,
@@ -347,7 +360,7 @@ def compute_rewards(
 
     # Velocity tracking reward: reward for matching target forward velocity
     current_velocity = root_lin_vel[:, 0]  # x-direction (forward) velocity
-    velocity_error = current_velocity - target_velocity
+    velocity_error = current_velocity - target_velocities[:, 0]
     rew_velocity = rew_scale_velocity * torch.exp(-torch.square(velocity_error))
 
     total_reward = (
