@@ -126,15 +126,11 @@ def build_pin_robot(urdf_path, mesh_dir):
 # 3. Main Conversion Pipeline
 # -----------------------------------------------
 def main():
-    # 3.1 Read CSV data and extract desired frame range (changed to frames 250~550)
-    csv_file = "g1/dance1_subject2.csv"
+    # 3.1 Read CSV data and extract desired frame range
+    csv_file = "../datasets/LAFAN1_Retargeting_Dataset/g1/walk1_subject1.csv"
     df = pd.read_csv(csv_file, header=None)
-    start_idx = 250
-    end_idx = 550
-    # csv_file = "g1/walk1_subject1.csv"
-    # df = pd.read_csv(csv_file, header=None)
-    # start_idx = 100
-    # end_idx = 300
+    start_idx = 100
+    end_idx = 500  # ~400 frames at 30fps
     data_orig = df.iloc[start_idx:end_idx].to_numpy(dtype=np.float32)
     N_orig = data_orig.shape[0]
     print(f"Loading CSV: {csv_file}, frame range [{start_idx}:{end_idx}], total {N_orig} frames.")
@@ -245,8 +241,8 @@ def main():
 
     # 3.8 Build pin.RobotWrapper
     #    (Please change urdf_path and mesh_dir to your actual paths)
-    urdf_path = "robot_description/g1/g1_29dof_rev_1_0.urdf"
-    mesh_dir = "robot_description/g1"
+    urdf_path = "../datasets/LAFAN1_Retargeting_Dataset/robot_description/g1/g1_29dof_rev_1_0.urdf"
+    mesh_dir = "../datasets/LAFAN1_Retargeting_Dataset/robot_description/g1"
     robot = build_pin_robot(urdf_path, mesh_dir)
     model = robot.model
     data_pk = robot.data
@@ -322,7 +318,7 @@ def main():
         "body_angular_velocities": body_angular_velocities    # float32 (N, B, 3)
     }
 
-    out_filename = "g1.npz"
+    out_filename = "G1_walk_lafan1.npz"
     np.savez(out_filename, **data_dict)
 
     print(f"Conversion completed, data saved to {out_filename}")
