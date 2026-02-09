@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -130,7 +131,7 @@ def main():
     csv_file = "../datasets/LAFAN1_Retargeting_Dataset/g1/walk1_subject1.csv"
     df = pd.read_csv(csv_file, header=None)
     start_idx = 100
-    end_idx = 500  # ~400 frames at 30fps
+    end_idx = 700  # 600 frames at 30fps = 20 seconds
     data_orig = df.iloc[start_idx:end_idx].to_numpy(dtype=np.float32)
     N_orig = data_orig.shape[0]
     print(f"Loading CSV: {csv_file}, frame range [{start_idx}:{end_idx}], total {N_orig} frames.")
@@ -240,9 +241,9 @@ def main():
     body_rotations = np.zeros((N, B, 4), dtype=np.float32)
 
     # 3.8 Build pin.RobotWrapper
-    #    (Please change urdf_path and mesh_dir to your actual paths)
-    urdf_path = "../datasets/LAFAN1_Retargeting_Dataset/robot_description/g1/g1_29dof_rev_1_0.urdf"
-    mesh_dir = "../datasets/LAFAN1_Retargeting_Dataset/robot_description/g1"
+    #    Use the same URDF as the simulation model for consistent FK
+    urdf_path = "../usd/g1_29dof_rev_1_0.urdf"
+    mesh_dir = "../usd"
     robot = build_pin_robot(urdf_path, mesh_dir)
     model = robot.model
     data_pk = robot.data
