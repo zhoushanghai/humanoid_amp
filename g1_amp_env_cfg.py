@@ -81,3 +81,8 @@ class G1AmpDanceEnvCfg(G1AmpEnvCfg):
 @configclass
 class G1AmpWalkEnvCfg(G1AmpEnvCfg):
     motion_file = os.path.join(MOTIONS_DIR, "G1_walk.npz")
+
+
+@configclass
+class G1AmpWalkCustomEnvCfg(G1AmpEnvCfg):
+    motion_file = os.path.join(MOTIONS_DIR, "walk1_subject1_custom.npz")

@@ -128,7 +128,7 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+# from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 
@@ -228,11 +228,18 @@ def main(
 
     # wrap for video recording
     if args_cli.video:
+        # Construct unique video prefix
+        import datetime
+        ckpt_name = os.path.basename(resume_path).split('.')[0]
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        video_prefix = f"{ckpt_name}_{timestamp}"
+
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
+            "name_prefix": video_prefix,
         }
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)

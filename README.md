@@ -71,7 +71,10 @@ The usage of some helper script functions is explained at the beginning of the f
 ## Motions Scripts
 - `motion_loader.py` - Load motion data from npz files and provide sampling functionality
 - `motion_viewer.py` - 3D visualization player for motion data
-- `data_convert.py` - Convert CSV motion data to npz format with interpolation and forward kinematics
+- `data_convert.py` - Convert CSV motion data to npz format. Usage:
+  ```bash
+  python motions/data_convert.py -i input.csv -o output.npz
+  ```
 - `motion_replayer.py` - Replay motion data in Isaac Sim with optional recording
 - `record_data.py` - Recording and managing motion data utility classes
 - `verify_motion.py` - Verify and display npz file contents
@@ -83,7 +86,7 @@ The usage of some helper script functions is explained at the beginning of the f
 
 **Note**: The original dataset and URDF files from [Unitree Robotics](https://huggingface.co/datasets/unitreerobotics/LAFAN1_Retargeting_Dataset) have been removed by the official source.
 
-If you're still looking for the dataset, a third-party mirror is currently available here:  
+If you're still looking for the dataset, a third-party mirror is currently available here:
 [lvhaidong/LAFAN1_Retargeting_Dataset](https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset)
 
 Or you can also use the data from [AMASS](https://huggingface.co/datasets/ember-lab-berkeley/AMASS_Retargeted_for_G1)

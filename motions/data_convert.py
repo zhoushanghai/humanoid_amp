@@ -126,15 +126,62 @@ def build_pin_robot(urdf_path, mesh_dir):
 # 3. Main Conversion Pipeline
 # -----------------------------------------------
 def main():
-    # 3.1 Read CSV data and extract desired frame range (changed to frames 250~550)
-    csv_file = "g1/dance1_subject2.csv"
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        description="Convert human motion CSV to AMP-compatible NPZ format."
+    )
+    parser.add_argument(
+        "--input",
+        "-i",
+        type=str,
+        default="datasets/LAFAN1_Retargeting_Dataset/g1/walk1_subject1.csv",
+        help="Path to the input CSV file",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="motions/walk1_subject1.npz",
+        help="Path to the output NPZ file",
+    )
+    parser.add_argument(
+        "--urdf",
+        type=str,
+        default="datasets/LAFAN1_Retargeting_Dataset/robot_description/g1/g1_29dof_rev_1_0.urdf",
+        help="Path to the robot URDF file",
+    )
+    parser.add_argument(
+        "--mesh-dir",
+        type=str,
+        default="datasets/LAFAN1_Retargeting_Dataset/robot_description/g1",
+        help="Path to the robot mesh directory",
+    )
+    parser.add_argument(
+        "--start-frame",
+        type=int,
+        default=0,
+        help="Start frame index (default: 0)",
+    )
+    parser.add_argument(
+        "--end-frame",
+        type=int,
+        default=None,
+        help="End frame index (default: None, meaning end of file)",
+    )
+
+    args = parser.parse_args()
+
+    # 3.1 Read CSV data and extract desired frame range
+    csv_file = args.input
+    if not os.path.exists(csv_file):
+        raise FileNotFoundError(f"Input file not found: {csv_file}")
+
     df = pd.read_csv(csv_file, header=None)
-    start_idx = 250
-    end_idx = 550
-    # csv_file = "g1/walk1_subject1.csv"
-    # df = pd.read_csv(csv_file, header=None)
-    # start_idx = 100
-    # end_idx = 300
+    start_idx = args.start_frame
+    end_idx = args.end_frame if args.end_frame is not None else len(df)
+
     data_orig = df.iloc[start_idx:end_idx].to_numpy(dtype=np.float32)
     N_orig = data_orig.shape[0]
     print(
@@ -247,8 +294,8 @@ def main():
 
     # 3.8 Build pin.RobotWrapper
     #    (Please change urdf_path and mesh_dir to your actual paths)
-    urdf_path = "robot_description/g1/g1_29dof_rev_1_0.urdf"
-    mesh_dir = "robot_description/g1"
+    urdf_path = args.urdf
+    mesh_dir = args.mesh_dir
     robot = build_pin_robot(urdf_path, mesh_dir)
     model = robot.model
     data_pk = robot.data
@@ -326,7 +373,7 @@ def main():
         "body_angular_velocities": body_angular_velocities,  # float32 (N, B, 3)
     }
 
-    out_filename = "g1.npz"
+    out_filename = args.output
     np.savez(out_filename, **data_dict)
 
     print(f"Conversion completed, data saved to {out_filename}")
