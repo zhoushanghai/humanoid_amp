@@ -69,3 +69,36 @@
     - **Reason for Removal**:
         1.  The module appears to be deprecated or moved in the current Isaac Lab version.
         2.  **Redundancy**: Our workflow exclusively uses local checkpoints (trained on-disk) provided via the `--checkpoint` argument. We do not need to download assets from Nucleus, rendering this import unnecessary for our current task.
+
+## 2026-02-11 Feature Update: Play Video Speed Sync
+
+- **Action**: Synchronize video playback speed with simulation time in `play.py`.
+- **Details**:
+    - **Modification**: Added logic to set `env.metadata["render_fps"] = int(1 / dt)` before initializing `gym.wrappers.RecordVideo`.
+    - **Logic**: The wrapper uses `render_fps` metadata to determine the output video frame rate. By setting it to the inverse of the simulation time step (`dt`), we ensure that 1 second of video playback corresponds to 1 second of simulation time.
+    - **Reason**: To fix the mismatch between simulation speed and video playback speed (often resulting in slow-motion videos when default 30 FPS is used for high-frequency simulations).
+
+## 2026-02-11 Support: Resume Training
+
+- **Action**: Documented command to resume training from a checkpoint.
+- **Details**:
+    - **Argument**: `--checkpoint /path/to/model.pt`
+    - **Execution Record**:
+        ```bash
+        conda run -n g1_amp python -m humanoid_amp.train \
+          --task Isaac-G1-AMP-Walk-Custom-v0 \
+          --headless \
+          --checkpoint logs/skrl/g1_amp_walk_custom/2026-02-11_14-25-39_ppo_torch/checkpoints/agent_40000.pt
+        ```
+    - **Mechanism**: The `skrl` runner loads the agent's state (weights, optimizer, etc.) from the provided checkpoint and continues the training loop from that point.
+
+## 2026-02-11 Support: Customize Training Iterations
+
+- **Action**: Explained how to override default training iterations (50,000).
+- **Details**:
+    - **Default Value Source**: `agents/skrl_g1_walk_custom_amp_cfg.yaml` (key `trainer.timesteps: 50000`).
+    - **Method 1 (Temporary)**: Use `--max_iterations` CLI argument.
+        ```bash
+        python -m humanoid_amp.train ... --max_iterations 100000
+        ```
+    - **Method 2 (Permanent)**: Modify `trainer.timesteps` in the YAML config file.
