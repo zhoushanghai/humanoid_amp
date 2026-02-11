@@ -22,20 +22,20 @@ MOTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "motions"
 @configclass
 class G1AmpEnvCfg(DirectRLEnvCfg):
     """Humanoid AMP environment config (base class)."""
-    
+
     # reward
     rew_termination = -0
     rew_action_l2 = -0.00
     rew_joint_pos_limits = -0
-    rew_joint_acc_l2 =-0.00
-    rew_joint_vel_l2= -0.00
+    rew_joint_acc_l2 = -0.00
+    rew_joint_vel_l2 = -0.00
 
     # env
     episode_length_s = 10.0
     decimation = 2
 
     # spaces
-    observation_space =  71 + 3 * 10 #TODO
+    observation_space = 71 + 3 * 10  # TODO
     action_space = 29
     state_space = 0
     num_amp_observations = 2
@@ -65,7 +65,9 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=4096, env_spacing=4.0, replicate_physics=True
+    )
 
     # robot
     robot: ArticulationCfg = G1_CFG.replace(prim_path="/World/envs/env_.*/Robot")
@@ -74,7 +76,8 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
 @configclass
 class G1AmpDanceEnvCfg(G1AmpEnvCfg):
     motion_file = os.path.join(MOTIONS_DIR, "G1_dance.npz")
-    
+
+
 @configclass
 class G1AmpWalkEnvCfg(G1AmpEnvCfg):
     motion_file = os.path.join(MOTIONS_DIR, "G1_walk.npz")
