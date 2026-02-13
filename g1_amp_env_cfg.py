@@ -27,19 +27,15 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     rew_termination = -0
     rew_action_l2 = -0.00
     rew_joint_pos_limits = -0
-    rew_joint_acc_l2 =-0.00
-    rew_joint_vel_l2= -0.00
+    rew_joint_acc_l2 = -0.00
+    rew_joint_vel_l2 = -0.00
 
     # env
     episode_length_s = 10.0
     decimation = 2
 
     # spaces
-<<<<<<< HEAD
-    observation_space =  71 + 3 * 10 #TODO
-=======
     observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
->>>>>>> dance
     action_space = 29
     state_space = 0
     num_amp_observations = 2
