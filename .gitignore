@@ -4,3 +4,5 @@
 logs/
 outputs/*
 *.egg-info
+datasets/
+humanoid_amp.egg-info/

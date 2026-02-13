@@ -9,10 +9,15 @@ import torch
 parser = argparse.ArgumentParser(
     description="Potential Field Controller Demo in Isaac Lab (Repulsive Only)."
 )
-parser.add_argument("--robot", type=str, default="franka_panda", help="Name of the robot.")
-parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+parser.add_argument(
+    "--robot", type=str, default="franka_panda", help="Name of the robot."
+)
+parser.add_argument(
+    "--num_envs", type=int, default=1, help="Number of environments to spawn."
+)
 # 这里添加 AppLauncher 相关的命令行参数
 from isaaclab.app import AppLauncher
+
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -30,13 +35,16 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab_assets import FRANKA_PANDA_HIGH_PD_CFG  # isort:skip G1_MINIMAL_CFG
-from isaaclab_assets import G1_MINIMAL_CFG  
+from isaaclab_assets import G1_MINIMAL_CFG
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
+
+
 # ========= 定义桌面场景配置 ==========
 @configclass
 class TableTopSceneCfg(InteractiveSceneCfg):
     """桌面场景的配置"""
+
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
         spawn=sim_utils.GroundPlaneCfg(),
@@ -62,7 +70,9 @@ class TableTopSceneCfg(InteractiveSceneCfg):
                 max_depenetration_velocity=1.0,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                enabled_self_collisions=False, solver_position_iteration_count=8, solver_velocity_iteration_count=4
+                enabled_self_collisions=False,
+                solver_position_iteration_count=8,
+                solver_velocity_iteration_count=4,
             ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
@@ -133,7 +143,6 @@ class TableTopSceneCfg(InteractiveSceneCfg):
                     ".*_shoulder_yaw_joint",
                     ".*_elbow_joint",
                     ".*_wrist_.*",
-
                 ],
                 effort_limit=300,
                 velocity_limit=100.0,
@@ -143,17 +152,18 @@ class TableTopSceneCfg(InteractiveSceneCfg):
                     ".*_shoulder_.*": 0.01,
                     ".*_elbow_.*": 0.01,
                     ".*_wrist_.*": 0.01,
-
                 },
             ),
         },
     )
+
 
 # ========= 辅助函数：打印机器人资产下所有 prim 的路径 ==========
 def list_robot_prims():
     try:
         # 使用 USD Python API 遍历 "/World/Robot" 下的所有子节点
         from pxr import Usd
+
         stage = Usd.Stage.GetCurrent()
         robot_prim = stage.GetPrimAtPath("/World/Robot")
         if robot_prim:
@@ -165,17 +175,18 @@ def list_robot_prims():
     except Exception as e:
         print("获取 USD Stage 时出错：", e)
 
+
 # ========= 运行仿真 ==========
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """主循环：运行仿真并打印出机器人关节与刚体信息（请先观察打印结果确定名称规则）"""
-    
+
     # 先打印出机器人资产下所有 prim 路径，帮助你确认实际的命名规则
     list_robot_prims()
-    
+
     # 如果你在上面的输出中找到了关节和身体对应的命名，可以在下面设置相应的正则表达式。
     # 例如，假设你观察后发现关节名称中包含 "joint" 而刚体名称中包含 "body"，可以这样设置：
     robot = scene["robot"]
-    
+
     print("解析到的关节名称列表:", robot.joint_names)
     print("解析到的刚体名称列表:", robot.body_names)
     print(robot.data.joint_pos.shape)
@@ -194,6 +205,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         sim.step()
         step_count += 1
 
+
 # ========= 主函数 ==========
 def main():
     # 创建仿真配置，指定仿真步长和设备（例如 "cuda:0" 或 "cpu"）
@@ -211,6 +223,7 @@ def main():
 
     # 进入主仿真循环
     run_simulator(sim, scene)
+
 
 if __name__ == "__main__":
     main()

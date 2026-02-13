@@ -22,7 +22,12 @@ class MotionViewer:
     Helper class to visualize motion data from NumPy-file format.
     """
 
-    def __init__(self, motion_file: str, device: torch.device | str = "cpu", render_scene: bool = False) -> None:
+    def __init__(
+        self,
+        motion_file: str,
+        device: torch.device | str = "cpu",
+        render_scene: bool = False,
+    ) -> None:
         """Load a motion file and initialize the internal variables.
 
         Args:
@@ -49,7 +54,9 @@ class MotionViewer:
         for i, name in enumerate(self._motion_loader.body_names):
             minimum = np.min(self._body_positions[:, i], axis=0).round(decimals=2)
             maximum = np.max(self._body_positions[:, i], axis=0).round(decimals=2)
-            print(f"  |-- [{name}] minimum position: {minimum}, maximum position: {maximum}")
+            print(
+                f"  |-- [{name}] minimum position: {minimum}, maximum position: {maximum}"
+            )
 
     def _drawing_callback(self, frame: int) -> None:
         """Drawing callback called each frame"""
@@ -80,7 +87,10 @@ class MotionViewer:
         self._figure_axes.set_zlim((center[2] - diff[2], center[2] + diff[2]))
         self._figure_axes.set_box_aspect(aspect=diff / diff[0])
         # plot ground plane
-        x, y = np.meshgrid([center[0] - diff[0], center[0] + diff[0]], [center[1] - diff[1], center[1] + diff[1]])
+        x, y = np.meshgrid(
+            [center[0] - diff[0], center[0] + diff[0]],
+            [center[1] - diff[1], center[1] + diff[1]],
+        )
         self._figure_axes.plot_surface(x, y, np.zeros_like(x), color="green", alpha=0.2)
         # print metadata
         self._figure_axes.set_xlabel("X")
@@ -121,7 +131,12 @@ if __name__ == "__main__":
             " of the skeleton."
         ),
     )
-    parser.add_argument("--matplotlib-backend", type=str, default="TkAgg", help="Matplotlib interactive backend")
+    parser.add_argument(
+        "--matplotlib-backend",
+        type=str,
+        default="TkAgg",
+        help="Matplotlib interactive backend",
+    )
     args, _ = parser.parse_known_args()
 
     # https://matplotlib.org/stable/users/explain/figure/backends.html#interactive-backends
