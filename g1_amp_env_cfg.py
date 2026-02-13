@@ -22,7 +22,7 @@ MOTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "motions"
 @configclass
 class G1AmpEnvCfg(DirectRLEnvCfg):
     """Humanoid AMP environment config (base class)."""
-    
+
     # reward
     rew_termination = -0.0
     rew_action_l2 = -0.1
@@ -30,20 +30,20 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     rew_joint_acc_l2 = -1.0e-06
     rew_joint_vel_l2 = -0.001
     # imitation reward parameters
-    rew_imitation_pos = 1.0      
+    rew_imitation_pos = 1.0
     rew_imitation_rot = 0.5
     rew_imitation_joint_pos = 2.5
-    rew_imitation_joint_vel = 1.0 
-    imitation_sigma_pos = 1.2     
-    imitation_sigma_rot = 0.5     
-    imitation_sigma_joint_pos = 1.5 
-    imitation_sigma_joint_vel = 8.0 
+    rew_imitation_joint_vel = 1.0
+    imitation_sigma_pos = 1.2
+    imitation_sigma_rot = 0.5
+    imitation_sigma_joint_pos = 1.5
+    imitation_sigma_joint_vel = 8.0
     # env
     episode_length_s = 10.0
     decimation = 1
 
     # spaces
-    observation_space =  71 + 3 * (8+5) - 6 + 1  # add progress feature
+    observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
     action_space = 29
     state_space = 0
     num_amp_observations = 3
@@ -73,7 +73,9 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=4096, env_spacing=4.0, replicate_physics=True
+    )
 
     # robot
     robot: ArticulationCfg = G1_CFG.replace(prim_path="/World/envs/env_.*/Robot")
@@ -82,7 +84,8 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
 @configclass
 class G1AmpDanceEnvCfg(G1AmpEnvCfg):
     motion_file = os.path.join(MOTIONS_DIR, "G1_dance.npz")
-    
+
+
 @configclass
 class G1AmpWalkEnvCfg(G1AmpEnvCfg):
     motion_file = os.path.join(MOTIONS_DIR, "G1_walk.npz")
