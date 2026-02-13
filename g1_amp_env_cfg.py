@@ -29,10 +29,12 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     rew_joint_pos_limits = -0
     rew_joint_acc_l2 = -0.00
     rew_joint_vel_l2 = -0.00
+    rew_track_vel = 0.0
 
     # env
     episode_length_s = 10.0
     decimation = 2
+    track_vel_range = (0.0, 0.0)
 
     # spaces
     observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
@@ -149,3 +151,14 @@ class G1AmpDanceEnvCfg(G1AmpEnvCfg_CUSTOM):
 class G1AmpCustomEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 5.0
     motion_file = os.path.join(MOTIONS_DIR, "custom_motion.npz")
+
+
+@configclass
+class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
+    episode_length_s = 5.0
+    motion_file = os.path.join(MOTIONS_DIR, "custom_motion.npz")
+    rew_track_vel = 1.0
+    track_vel_range = (0.0, 1.0)
+    # add target speed to observation space
+    observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
+    amp_observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1

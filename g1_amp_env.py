@@ -81,6 +81,9 @@ class G1AmpEnv(DirectRLEnv):
             ),
             device=self.device,
         )
+        self.command_target_speed = torch.zeros(
+            (self.num_envs, 1), device=self.device, dtype=torch.float32
+        )
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -133,6 +136,7 @@ class G1AmpEnv(DirectRLEnv):
             self.robot.data.body_ang_vel_w[:, self.ref_body_index],
             self.robot.data.body_pos_w[:, self.key_body_indexes],
             progress,
+            self.command_target_speed if self.cfg.rew_track_vel > 0.0 else None,
         )
 
         # update AMP observation history
@@ -227,7 +231,29 @@ class G1AmpEnv(DirectRLEnv):
         # 5. total imitation reward
         imitation_reward = rew_joint_pos + rew_joint_vel + rew_pos + rew_rot
 
+        # 5. total imitation reward
+        imitation_reward = rew_joint_pos + rew_joint_vel + rew_pos + rew_rot
+
+        # ================= speed tracking reward ==========================
+        if self.cfg.rew_track_vel > 0.0:
+            # calculate planar speed
+            current_speed = torch.norm(
+                self.robot.data.body_lin_vel_w[:, self.ref_body_index, :2], dim=-1
+            ).unsqueeze(-1)
+            track_vel_error = torch.abs(current_speed - self.command_target_speed)
+            rew_track_vel = exp_reward_with_floor(
+                torch.square(track_vel_error).squeeze(-1),
+                self.cfg.rew_track_vel,
+                0.5,  # sigma for velocity tracking
+                floor=4.0,
+            )
+        else:
+            rew_track_vel = torch.zeros(
+                self.num_envs, dtype=torch.float, device=self.device
+            )
+
         # ================= basic reward (call the original compute_rewards function) ==========================
+
         basic_reward, basic_reward_log = compute_rewards(
             self.cfg.rew_termination,
             self.cfg.rew_action_l2,
@@ -243,7 +269,7 @@ class G1AmpEnv(DirectRLEnv):
         )
 
         # ================= total reward ==========================
-        total_reward = imitation_reward + basic_reward
+        total_reward = imitation_reward + basic_reward + rew_track_vel
 
         # ============== log ================================
         log_dict = {
@@ -257,8 +283,12 @@ class G1AmpEnv(DirectRLEnv):
             "error_joint_vel": joint_vel_error.mean().item(),
             "error_root_pos": pos_err.mean().item(),
             "error_ang": ang_err.mean().item(),
+            "error_ang": ang_err.mean().item(),
             "total_reward": total_reward.mean().item(),
         }
+        if self.cfg.rew_track_vel > 0.0:
+            log_dict["rew_track_vel"] = rew_track_vel.mean().item()
+            log_dict["error_track_vel"] = track_vel_error.mean().item()
 
         # add basic reward log
         for key, value in basic_reward_log.items():
@@ -367,6 +397,16 @@ class G1AmpEnv(DirectRLEnv):
             num_samples, self.cfg.num_amp_observations, -1
         )
 
+        # sample random target speed
+        if self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]:
+            self.command_target_speed[env_ids] = (
+                torch.rand((len(env_ids), 1), device=self.device)
+                * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
+                + self.cfg.track_vel_range[0]
+            )
+        else:
+            self.command_target_speed[env_ids] = 0.0
+
         return root_state, dof_pos, dof_vel
 
     # env methods
@@ -407,6 +447,15 @@ class G1AmpEnv(DirectRLEnv):
             body_angular_velocities[:, self.motion_ref_body_index],
             body_positions[:, self.motion_key_body_indexes],
             progress,
+            (
+                torch.norm(
+                    body_linear_velocities[:, self.motion_ref_body_index, :2],
+                    dim=-1,
+                    keepdim=True,
+                )
+                if self.cfg.rew_track_vel > 0.0
+                else None
+            ),
         )
         return amp_observation.view(-1, self.amp_observation_size)
 
@@ -467,20 +516,25 @@ def compute_obs(
     root_angular_velocities: torch.Tensor,
     key_body_positions: torch.Tensor,
     progress: torch.Tensor,
+    command_target_speed: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    obs = torch.cat(
-        (
-            dof_positions,
-            dof_velocities,
-            root_positions[:, 2:3],  # root body height
-            quaternion_to_tangent_and_normal(root_rotations),
-            # root_linear_velocities,
-            # root_angular_velocities,
-            (key_body_positions - root_positions.unsqueeze(-2)).view(
-                key_body_positions.shape[0], -1
-            ),
-            progress,
+    obs_list = [
+        dof_positions,
+        dof_velocities,
+        root_positions[:, 2:3],  # root body height
+        quaternion_to_tangent_and_normal(root_rotations),
+        # root_linear_velocities,
+        # root_angular_velocities,
+        (key_body_positions - root_positions.unsqueeze(-2)).view(
+            key_body_positions.shape[0], -1
         ),
+        progress,
+    ]
+    if command_target_speed is not None:
+        obs_list.append(command_target_speed)
+
+    obs = torch.cat(
+        obs_list,
         dim=-1,
     )
     return obs

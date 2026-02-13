@@ -32,4 +32,8 @@
 
 
 
-
+---
+ speed
+```
+python -m humanoid_amp.train --task Isaac-G1-AMP-Speed-Direct-v0 --headless --num-envs 1024
+```
