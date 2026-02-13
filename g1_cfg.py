@@ -9,8 +9,8 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 G1_CFG = ArticulationCfg(
     prim_path="{ENV_REGEX_NS}/Robot",
-    spawn=sim_utils.UsdFileCfg(
-        usd_path=os.path.join(CURRENT_DIR, "usd/g1_29dof_rev_1_0.usd"),
+    spawn=sim_utils.UrdfFileCfg(
+        asset_path=os.path.join(CURRENT_DIR, "g1_model/urdf/g1_29dof_rev_1_0.urdf"),
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -26,6 +26,8 @@ G1_CFG = ArticulationCfg(
             solver_position_iteration_count=4,
             solver_velocity_iteration_count=1,
         ),
+        fix_base=False,
+        default_drive_type="position",
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.8),
