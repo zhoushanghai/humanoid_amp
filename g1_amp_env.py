@@ -132,6 +132,7 @@ class G1AmpEnv(DirectRLEnv):
             self.robot.data.body_lin_vel_w[:, self.ref_body_index],
             self.robot.data.body_ang_vel_w[:, self.ref_body_index],
             self.robot.data.body_pos_w[:, self.key_body_indexes],
+            progress,
         )
 
         # update AMP observation history
@@ -405,6 +406,7 @@ class G1AmpEnv(DirectRLEnv):
             body_linear_velocities[:, self.motion_ref_body_index],
             body_angular_velocities[:, self.motion_ref_body_index],
             body_positions[:, self.motion_key_body_indexes],
+            progress,
         )
         return amp_observation.view(-1, self.amp_observation_size)
 
@@ -464,6 +466,7 @@ def compute_obs(
     root_linear_velocities: torch.Tensor,
     root_angular_velocities: torch.Tensor,
     key_body_positions: torch.Tensor,
+    progress: torch.Tensor,
 ) -> torch.Tensor:
     obs = torch.cat(
         (

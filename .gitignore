@@ -5,4 +5,3 @@ logs/
 outputs/*
 *.egg-info
 humanoid_amp.egg-info/
-datasets/LAFAN1_Retargeting_Dataset/*

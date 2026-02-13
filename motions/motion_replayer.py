@@ -221,6 +221,9 @@ try:
             scene.write_data_to_sim()
             sim.step(render=True)
 
+            if i % 10 == 0:
+                print(f"Playing frame {i}/{num_frames}", end="\r", flush=True)
+
 except KeyboardInterrupt:
     print("\nProgram interrupted by user")
 

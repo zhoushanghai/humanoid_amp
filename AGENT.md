@@ -170,7 +170,7 @@ DEV_LOG.md
 
 ### 5.1 Hugging Face 数据集下载
 
-所有数据集统一存放于项目根目录的 `datasets/`。
+所有数据集统一存放于用户主目录的 `~/datasets/`。
 
 **环境准备**：
 
@@ -188,11 +188,11 @@ pip install huggingface_hub
 ```bash
 conda activate hf_download
 # 语法模板
-hf download <Repo_ID> --repo-type dataset --local-dir ./datasets/<Dataset_Name>
+hf download <Repo_ID> --repo-type dataset --local-dir  ~/datasets/<Dataset_Name>
 
 # 实际示例 (LAFAN1)
 hf download lvhaidong/LAFAN1_Retargeting_Dataset \
   --repo-type dataset \
-  --local-dir ./datasets/LAFAN1_Retargeting_Dataset
+  --local-dir ~/datasets/LAFAN1_Retargeting_Dataset
 
 ```

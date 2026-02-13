@@ -142,9 +142,10 @@ class G1AmpWalkEnvCfg(G1AmpEnvCfg):
 
 @configclass
 class G1AmpDanceEnvCfg(G1AmpEnvCfg_CUSTOM):
-    motion_file = os.path.join(MOTIONS_DIR, "converted_motion.npz")
+    motion_file = os.path.join(MOTIONS_DIR, "G1_dance.npz")
 
 
 @configclass
 class G1AmpCustomEnvCfg(G1AmpEnvCfg_CUSTOM):
-    motion_file = os.path.join(MOTIONS_DIR, "converted_motion.npz")
+    episode_length_s = 5.0
+    motion_file = os.path.join(MOTIONS_DIR, "custom_motion.npz")
