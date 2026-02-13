@@ -27,7 +27,15 @@ G1_CFG = ArticulationCfg(
             solver_velocity_iteration_count=1,
         ),
         fix_base=False,
-        default_drive_type="position",
+        merge_fixed_joints=False,
+        joint_drive=sim_utils.UrdfFileCfg.JointDriveCfg(
+            drive_type="force",
+            target_type="position",
+            gains=sim_utils.UrdfFileCfg.JointDriveCfg.PDGainsCfg(
+                stiffness=0.0,
+                damping=0.0,
+            ),
+        ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.8),
