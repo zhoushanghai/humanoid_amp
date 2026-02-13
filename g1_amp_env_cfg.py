@@ -83,7 +83,7 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
 
 @configclass
 class G1AmpDanceEnvCfg(G1AmpEnvCfg):
-    motion_file = os.path.join(MOTIONS_DIR, "G1_dance.npz")
+    motion_file = os.path.join(MOTIONS_DIR, "converted_motion.npz")
 
 
 @configclass

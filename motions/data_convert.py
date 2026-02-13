@@ -49,6 +49,7 @@ CONFIGURATION:
     - Customize joint_names and body_names arrays as needed
 """
 
+import argparse
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter1d
@@ -125,21 +126,48 @@ def build_pin_robot(urdf_path, mesh_dir):
 # -----------------------------------------------
 # 3. Main Conversion Pipeline
 # -----------------------------------------------
-def main():
-    # 3.1 Read CSV data and extract desired frame range (changed to frames 250~550)
-    csv_file = "g1/dance1_subject2.csv"
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert motion data to NPZ for Isaac Lab."
+    )
+    parser.add_argument(
+        "--csv", type=str, required=True, help="Path to input CSV motion file"
+    )
+    parser.add_argument(
+        "--urdf", type=str, required=True, help="Path to robot URDF file"
+    )
+    parser.add_argument(
+        "--meshes", type=str, required=True, help="Path to mesh directory"
+    )
+    parser.add_argument(
+        "--output", type=str, default="converted_motion.npz", help="Output NPZ filename"
+    )
+    parser.add_argument("--start", type=int, default=0, help="Start frame index")
+    parser.add_argument(
+        "--end", type=int, default=None, help="End frame index (default: end of file)"
+    )
+    parser.add_argument("--fps", type=int, default=60, help="Target FPS (default: 60)")
+    return parser.parse_args()
+
+
+def main(args):
+    # 3.1 Read CSV data and extract desired frame range
+    csv_file = args.csv
     df = pd.read_csv(csv_file, header=None)
-    start_idx = 250
-    end_idx = 550
-    # csv_file = "g1/walk1_subject1.csv"
-    # df = pd.read_csv(csv_file, header=None)
-    # start_idx = 100
-    # end_idx = 300
+
+    start_idx = args.start
+    if args.end is None:
+        end_idx = len(df)
+    else:
+        end_idx = args.end
+
+    print(
+        f"Loading CSV: {csv_file}, planning to extract frames [{start_idx}:{end_idx}]"
+    )
+
     data_orig = df.iloc[start_idx:end_idx].to_numpy(dtype=np.float32)
     N_orig = data_orig.shape[0]
-    print(
-        f"Loading CSV: {csv_file}, frame range [{start_idx}:{end_idx}], total {N_orig} frames."
-    )
+    print(f"Actual loaded frames: {N_orig}")
 
     # Original CSV: first 7 columns are root data, remaining are joint data
     root_data_orig = data_orig[:, :7]  # (N_orig, 7)
@@ -150,7 +178,7 @@ def main():
     dt_orig = 1.0 / fps_orig
     t_orig = np.linspace(0, (N_orig - 1) * dt_orig, N_orig)
 
-    fps_new = 60
+    fps_new = args.fps
     dt_new = 1.0 / fps_new
     N_new = 2 * N_orig - 1  # Insert one new frame between every two frames
     t_new = np.linspace(0, (N_orig - 1) * dt_orig, N_new)
@@ -247,8 +275,8 @@ def main():
 
     # 3.8 Build pin.RobotWrapper
     #    (Please change urdf_path and mesh_dir to your actual paths)
-    urdf_path = "robot_description/g1/g1_29dof_rev_1_0.urdf"
-    mesh_dir = "robot_description/g1"
+    urdf_path = args.urdf
+    mesh_dir = args.meshes
     robot = build_pin_robot(urdf_path, mesh_dir)
     model = robot.model
     data_pk = robot.data
@@ -326,7 +354,7 @@ def main():
         "body_angular_velocities": body_angular_velocities,  # float32 (N, B, 3)
     }
 
-    out_filename = "g1.npz"
+    out_filename = args.output
     np.savez(out_filename, **data_dict)
 
     print(f"Conversion completed, data saved to {out_filename}")
@@ -342,4 +370,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

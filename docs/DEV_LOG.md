@@ -22,6 +22,14 @@
     - **Correction (2)**: Added `gains` with `stiffness=0.0` and `damping=0.0` to `JointDriveCfg` to fix `Missing values detected` error.
     - **Correction (3)**: Set `merge_fixed_joints=False` to prevent `right_rubber_hand` from being merged, fixing `ValueError`.
 
+## Tool Enhancement
+- **Date**: 2026-02-13
+- **Action**: updated `motions/data_convert.py`
+- **Details**:
+    - Corrected relative paths for `urdf_path` and `mesh_dir`.
+    - Added `argparse` support for command-line arguments: `--input`, `--output`, `--start-frame`, `--end-frame`.
+    - **Correction**: Used `os.path.abspath(__file__)` to resolve URDF/mesh paths, fixing `FileNotFoundError` when running from different directories.
+
 
 
 
