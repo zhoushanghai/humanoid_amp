@@ -140,7 +140,10 @@ def parse_args():
         "--meshes", type=str, required=True, help="Path to mesh directory"
     )
     parser.add_argument(
-        "--output", type=str, default="converted_motion.npz", help="Output NPZ filename"
+        "--output",
+        type=str,
+        default="motions/custom_motion.npz",
+        help="Output NPZ filename",
     )
     parser.add_argument("--start", type=int, default=0, help="Start frame index")
     parser.add_argument(
@@ -254,17 +257,30 @@ def main(args):
     # 3.7 Specify link names to record and get their poses in global coordinate frame
     body_names = [
         "pelvis",
-        # "head_link",
+        "head_link",
+        "torso_link",
         "left_shoulder_pitch_link",
-        "right_shoulder_pitch_link",
+        "left_shoulder_roll_link",
+        "left_shoulder_yaw_link",
         "left_elbow_link",
+        "right_shoulder_pitch_link",
+        "right_shoulder_roll_link",
+        "right_shoulder_yaw_link",
         "right_elbow_link",
-        "right_hip_yaw_link",
         "left_hip_yaw_link",
+        "left_hip_roll_link",
+        "left_hip_pitch_link",
+        "left_knee_link",
+        "right_hip_yaw_link",
+        "right_hip_roll_link",
+        "right_hip_pitch_link",
+        "right_knee_link",
         "right_rubber_hand",
         "left_rubber_hand",
         "right_ankle_roll_link",
         "left_ankle_roll_link",
+        "waist_yaw_link",
+        "waist_roll_link",
     ]
 
     body_names = np.array(body_names, dtype=np.str_)
