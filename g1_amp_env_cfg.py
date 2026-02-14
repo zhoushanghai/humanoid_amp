@@ -85,6 +85,7 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     rew_joint_pos_limits = -10
     rew_joint_acc_l2 = -1.0e-06
     rew_joint_vel_l2 = -0.001
+    rew_track_vel = 0.0
     # imitation reward parameters
     rew_imitation_pos = 1.0
     rew_imitation_rot = 0.5
@@ -97,6 +98,7 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     # env
     episode_length_s = 10.0
     decimation = 1
+    track_vel_range = (0.0, 0.0)
 
     # spaces
     observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
