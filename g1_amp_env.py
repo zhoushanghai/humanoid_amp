@@ -118,7 +118,7 @@ class G1AmpEnv(DirectRLEnv):
     def _get_observations(self) -> dict:
         # calculate progress: current episode step / max step, shape [num_envs, 1]
         progress = (
-            self.episode_length_buf.squeeze(-1).float() / (self.max_episode_length - 1)
+            self.episode_length_buf.view(-1).float() / (self.max_episode_length - 1)
         ).unsqueeze(-1)
         # convert to relative coordinates, keep consistent with reference action observation
         root_pos_relative = (

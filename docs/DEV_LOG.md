@@ -47,3 +47,15 @@ python -m humanoid_amp.play \
 --task Isaac-G1-AMP-Custom-Direct-v0 \
 --num_envs 32 \
 --checkpoint logs/skrl/g1_amp_dance/2026-02-14_04-58-01_ppo_torch/checkpoints/agent_450000.pt
+
+---
+python -m humanoid_amp.play_velocity_track \
+  --task Isaac-G1-AMP-Speed-Direct-v0 \
+  --num_envs 1 \
+  --video \
+  --video_length 400 \
+  --target_vel 1.0 \
+  --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt \
+  --headless
+
+
