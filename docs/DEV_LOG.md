@@ -30,6 +30,18 @@
     - Added `argparse` support for command-line arguments: `--input`, `--output`, `--start-frame`, `--end-frame`.
     - **Correction**: Used `os.path.abspath(__file__)` to resolve URDF/mesh paths, fixing `FileNotFoundError` when running from different directories.
 
+转化脚本
+python motions/data_convert.py \
+  --csv  datasets/walk1_subject1.csv\
+  --urdf g1_model/urdf/g1_29dof_rev_1_0.urdf \
+  --meshes g1_model/urdf \
+  --start 110 \
+  --end 265
+  
+  
+python motions/motion_replayer.py \
+--motion motions/custom_motion.npz
+
 
 
 ---
@@ -58,4 +70,13 @@ python -m humanoid_amp.play_velocity_track \
   --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt \
   --headless
 
+python -m humanoid_amp.play_velocity_track \
+  --task Isaac-G1-AMP-Speed-Direct-v0 \
+  --num_envs 1 \
+  --headless \
+  --target_vel 1.0 \
+  --warmup_steps 50 \
+  --video \
+  --video_length 400 \
+  --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt
 

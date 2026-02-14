@@ -60,6 +60,7 @@ parser.add_argument(
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--target_vel", type=float, default=1.0, help="Target velocity to track (m/s).")
 parser.add_argument("--duration", type=int, default=1000, help="Duration of the playback in steps.")
+parser.add_argument("--warmup_steps", type=int, default=50, help="Number of steps with 0 velocity at the beginning.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -240,12 +241,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     print(f"[INFO] Starting playback with target velocity: {args_cli.target_vel} m/s")
 
+
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
 
         # OVERRIDE TARGET VELOCITY
+        # Determine current target velocity based on warmup
+        if timestep < args_cli.warmup_steps:
+             current_target_vel = 0.0
+        else:
+             current_target_vel = args_cli.target_vel
+
         # We need to access the underlying environment to set the command
         # SkrlVecEnvWrapper -> env -> DirectRLEnv (G1AmpEnv)
         # However, due to wrappers, we might need to unwrap or access correctly.
@@ -253,7 +261,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         
         # Check if we can access the command_target_speed
         if hasattr(env.unwrapped, "command_target_speed"):
-             env.unwrapped.command_target_speed[:] = args_cli.target_vel
+             env.unwrapped.command_target_speed[:] = current_target_vel
         
         # run everything in inference mode
         with torch.inference_mode():
@@ -272,7 +280,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                 lin_vel = env.unwrapped.robot.data.body_lin_vel_w[:, env.unwrapped.ref_body_index, :2]
                 speed = torch.norm(lin_vel, dim=-1).mean().item()
                 actual_speeds.append(speed)
-                target_speeds.append(args_cli.target_vel)
+                target_speeds.append(current_target_vel)
                 steps.append(timestep)
 
         if args_cli.video:
