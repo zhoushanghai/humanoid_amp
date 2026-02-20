@@ -95,6 +95,10 @@ def compute_angular_velocity(q_prev, q_next, dt, eps=1e-8):
         return np.zeros(3, dtype=np.float32)
     q_rel /= norm_q_rel
 
+    # Shortest path: if w < 0, negate the quaternion to take the shorter rotation path
+    if q_rel[0] < 0.0:
+        q_rel = -q_rel
+
     w = np.clip(q_rel[0], -1.0, 1.0)
     angle = 2.0 * np.arccos(w)
     sin_half = np.sqrt(1.0 - w * w)
