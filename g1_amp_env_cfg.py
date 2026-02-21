@@ -156,7 +156,7 @@ class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 5.0
     motion_file = os.path.join(MOTIONS_DIR, "custom_motion.npz")
     rew_track_vel = 1.0
-    track_vel_range = (0.0, 1.0)
+    track_vel_range = (1.0, 1.0)
     # add target speed to observation space
     observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
     amp_observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
@@ -164,6 +164,6 @@ class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
 
 @configclass
 class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
-    episode_length_s = 10.0
+    episode_length_s = 5.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"

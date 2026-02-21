@@ -6,3 +6,4 @@ outputs/*
 *.egg-info
 humanoid_amp.egg-info/
 .vscode/
+.claude/

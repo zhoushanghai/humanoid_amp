@@ -345,7 +345,8 @@ class G1AmpEnv(DirectRLEnv):
                 + self.cfg.command_resampling_time_range[0]
             )
         else:
-            self.command_target_speed[env_ids] = 0.0
+            self.command_target_speed[env_ids, 0] = self.cfg.track_vel_range[0]
+            self.command_target_speed[env_ids, 1] = 0.0
             self.command_time_left[env_ids] = float("inf")
 
         return root_state, dof_pos, dof_vel
