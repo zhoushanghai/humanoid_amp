@@ -164,3 +164,10 @@ class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
     # add target speed to observation space
     observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
     amp_observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
+
+
+@configclass
+class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
+    episode_length_s = 10.0
+    motion_file = "/home/hz/datasets/g1_amp_nzp/*walk*.npz"
+    reset_strategy = "random"

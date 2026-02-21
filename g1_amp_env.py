@@ -84,6 +84,12 @@ class G1AmpEnv(DirectRLEnv):
         self.command_target_speed = torch.zeros(
             (self.num_envs, 1), device=self.device, dtype=torch.float32
         )
+        self.motion_ids = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self.motion_start_times = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -156,7 +162,10 @@ class G1AmpEnv(DirectRLEnv):
         # ================= imitation reward ==========================
         with torch.no_grad():
             # get reference action at current time
-            current_times = (self.episode_length_buf * self.physics_dt).cpu().numpy()
+            current_times = (
+                self.episode_length_buf * self.physics_dt
+            ).cpu().numpy() + self.motion_start_times.cpu().numpy()
+            motion_ids = self.motion_ids.cpu().numpy()
             # sample reference action data
             (
                 ref_dof_positions,
@@ -166,7 +175,7 @@ class G1AmpEnv(DirectRLEnv):
                 _,
                 _,
             ) = self._motion_loader.sample(
-                num_samples=self.num_envs, times=current_times
+                num_samples=self.num_envs, times=current_times, motion_ids=motion_ids
             )
 
             # get reference joint angles and velocities
@@ -360,11 +369,15 @@ class G1AmpEnv(DirectRLEnv):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # sample random motion times (or zeros if start is True)
         num_samples = env_ids.shape[0]
-        times = (
-            np.zeros(num_samples)
-            if start
-            else self._motion_loader.sample_times(num_samples)
+        motion_ids, times = self._motion_loader.sample_times(num_samples, start=start)
+
+        self.motion_ids[env_ids] = torch.tensor(
+            motion_ids, dtype=torch.long, device=self.device
         )
+        self.motion_start_times[env_ids] = torch.tensor(
+            times, dtype=torch.float32, device=self.device
+        )
+
         # sample random motions
         (
             dof_positions,
@@ -373,7 +386,9 @@ class G1AmpEnv(DirectRLEnv):
             body_rotations,
             body_linear_velocities,
             body_angular_velocities,
-        ) = self._motion_loader.sample(num_samples=num_samples, times=times)
+        ) = self._motion_loader.sample(
+            num_samples=num_samples, times=times, motion_ids=motion_ids
+        )
 
         # get root transforms (the humanoid torso)
         motion_torso_index = self._motion_loader.get_body_index(["pelvis"])[0]
@@ -392,7 +407,9 @@ class G1AmpEnv(DirectRLEnv):
         dof_vel = dof_velocities[:, self.motion_dof_indexes]
 
         # update AMP observation
-        amp_observations = self.collect_reference_motions(num_samples, times)
+        amp_observations = self.collect_reference_motions(
+            num_samples, times, motion_ids
+        )
         self.amp_observation_buffer[env_ids] = amp_observations.view(
             num_samples, self.cfg.num_amp_observations, -1
         )
@@ -412,15 +429,24 @@ class G1AmpEnv(DirectRLEnv):
     # env methods
 
     def collect_reference_motions(
-        self, num_samples: int, current_times: np.ndarray | None = None
+        self,
+        num_samples: int,
+        current_times: np.ndarray | None = None,
+        motion_ids: np.ndarray | None = None,
     ) -> torch.Tensor:
         # sample random motion times (or use the one specified)
         if current_times is None:
-            current_times = self._motion_loader.sample_times(num_samples)
+            motion_ids, current_times = self._motion_loader.sample_times(num_samples)
         times = (
             np.expand_dims(current_times, axis=-1)
             - self._motion_loader.dt * np.arange(0, self.cfg.num_amp_observations)
         ).flatten()
+
+        if motion_ids is not None:
+            motion_ids_expanded = np.repeat(motion_ids, self.cfg.num_amp_observations)
+        else:
+            motion_ids_expanded = np.zeros_like(times, dtype=np.int32)
+
         # get motions
         (
             dof_positions,
@@ -429,7 +455,9 @@ class G1AmpEnv(DirectRLEnv):
             body_rotations,
             body_linear_velocities,
             body_angular_velocities,
-        ) = self._motion_loader.sample(num_samples=num_samples, times=times)
+        ) = self._motion_loader.sample(
+            num_samples=num_samples, times=times, motion_ids=motion_ids_expanded
+        )
         # compute AMP observation
         progress = (
             torch.as_tensor(

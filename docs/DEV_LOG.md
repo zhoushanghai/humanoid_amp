@@ -40,7 +40,10 @@ python motions/data_convert.py \
   
   
 python motions/motion_replayer.py \
---motion motions/custom_motion.npz
+  --motion motions/custom_motion.npz
+
+python motions/motion_replayer.py \
+  --motion /home/hz/datasets/g1_amp_nzp/walk1_subject1.npz
 
 
 
@@ -80,3 +83,12 @@ python -m humanoid_amp.play_velocity_track \
   --video_length 400 \
   --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt
 
+
+---
+拼接 12 条 walk 数据集
+python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
+
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/g1_amp_dance/2026-02-21_01-30-28_ppo_torch/checkpoints/agent_1240000.pt
