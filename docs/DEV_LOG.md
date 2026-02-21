@@ -92,3 +92,16 @@ python -m humanoid_amp.play \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --num_envs 32 \
   --checkpoint logs/skrl/g1_amp_dance/2026-02-21_01-30-28_ppo_torch/checkpoints/agent_1240000.pt
+
+  walk1_subject1.npz: 15459 frames, 257.65 sec, fps=60
+  walk1_subject2.npz: 15459 frames, 257.65 sec, fps=60
+  walk1_subject5.npz: 15459 frames, 257.65 sec, fps=60
+  walk2_subject1.npz: 14071 frames, 234.52 sec, fps=60
+  walk2_subject3.npz: 14071 frames, 234.52 sec, fps=60
+  walk2_subject4.npz: 14071 frames, 234.52 sec, fps=60
+  walk3_subject1.npz: 14577 frames, 242.95 sec, fps=60
+  walk3_subject2.npz: 14577 frames, 242.95 sec, fps=60
+  walk3_subject3.npz: 14577 frames, 242.95 sec, fps=60
+  walk3_subject4.npz: 14577 frames, 242.95 sec, fps=60
+  walk3_subject5.npz: 14577 frames, 242.95 sec, fps=60
+  walk4_subject1.npz: 9615 frames, 160.25 sec, fps=60
