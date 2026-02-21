@@ -89,8 +89,8 @@ agent:
   value_loss_scale: 2.5
   discriminator_loss_scale: 5.0
   amp_batch_size: 512
-  task_reward_weight: 1
-  style_reward_weight: 1.0
+  task_reward_weight: 0.5
+  style_reward_weight: 0.5
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05
@@ -98,11 +98,10 @@ agent:
   discriminator_weight_decay_scale: 1.0e-04
   # rewards_shaper_scale: 1.0
   time_limit_bootstrap: False
-  # logging and checkpoint
   experiment:
     directory: "g1_amp_dance"
     experiment_name: ""
-    write_interval: auto
+    write_interval: 16
     checkpoint_interval: 5000
 
 

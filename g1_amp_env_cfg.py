@@ -80,32 +80,28 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     """Humanoid AMP environment config (base class)."""
 
     # reward
-    rew_termination = -0.0
+    rew_termination = -1.0
     rew_action_l2 = -0.1
     rew_joint_pos_limits = -10
     rew_joint_acc_l2 = -1.0e-06
     rew_joint_vel_l2 = -0.001
-    rew_track_vel = 0.0
-    # imitation reward parameters
-    rew_imitation_pos = 1.0
-    rew_imitation_rot = 0.5
-    rew_imitation_joint_pos = 2.5
-    rew_imitation_joint_vel = 1.0
-    imitation_sigma_pos = 1.2
-    imitation_sigma_rot = 0.5
-    imitation_sigma_joint_pos = 1.5
-    imitation_sigma_joint_vel = 8.0
+    rew_track_vel = 1.0
+
     # env
     episode_length_s = 10.0
     decimation = 1
-    track_vel_range = (0.0, 0.0)
+    track_vel_range = (-1.0, 1.0)  # (-1 to 1 for generic random tracking velocities)
+    command_resampling_time_range = (
+        4.0,
+        7.0,
+    )  # how often to resample target velocities in seconds
 
-    # spaces
-    observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
+    # spaces (Observation now includes 2D command velocity, AMP observation does not)
+    observation_space = 85
     action_space = 29
     state_space = 0
-    num_amp_observations = 3
-    amp_observation_space = 71 + 3 * (8 + 5) - 6 + 1
+    num_amp_observations = 10
+    amp_observation_space = 83
 
     early_termination = True
     termination_height = 0.5
