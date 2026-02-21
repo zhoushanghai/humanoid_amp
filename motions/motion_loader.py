@@ -7,26 +7,97 @@ import numpy as np
 import os
 import torch
 from typing import Optional
-
-
 import glob
+import yaml
+
+
+def _resolve_motion_files(motion_file: str) -> list[str]:
+    """Resolve motion files from various input formats.
+
+    Supports:
+    - YAML config file with motion_files list
+    - Glob patterns (*, ?)
+    - Directory paths
+    - Individual file paths
+    - Comma-separated file paths
+
+    Args:
+        motion_file: Path to config/file/pattern
+
+    Returns:
+        List of resolved file paths
+    """
+    # Check if it's a YAML config file
+    if motion_file.endswith('.yaml') or motion_file.endswith('.yml'):
+        config_dir = os.path.dirname(motion_file)
+        with open(motion_file, 'r') as f:
+            config = yaml.safe_load(f)
+
+        files = []
+        if config and 'motion_files' in config:
+            for path in config['motion_files']:
+                # Resolve relative paths based on config file location
+                if not os.path.isabs(path):
+                    path = os.path.join(config_dir, path)
+                if os.path.exists(path):
+                    files.append(path)
+                else:
+                    print(f"Warning: File not found: {path}")
+
+        # Also support glob_pattern from config
+        if not files and 'glob_pattern' in config:
+            pattern = config['glob_pattern']
+            if not os.path.isabs(pattern):
+                pattern = os.path.join(config_dir, pattern)
+            files = sorted(glob.glob(pattern))
+
+        if not files:
+            raise ValueError(f"No valid motion files found in config: {motion_file}")
+        return files
+
+    # Comma-separated files
+    if ',' in motion_file:
+        files = []
+        for f in motion_file.split(','):
+            f = f.strip()
+            if os.path.exists(f):
+                files.append(f)
+        if files:
+            return files
+
+    # Glob pattern
+    if "*" in motion_file or "?" in motion_file:
+        files = sorted(glob.glob(motion_file))
+        if files:
+            return files
+
+    # Directory
+    if os.path.isdir(motion_file):
+        files = sorted(glob.glob(os.path.join(motion_file, "*.npz")))
+        if files:
+            return files
+
+    # Single file
+    if os.path.exists(motion_file):
+        return [motion_file]
+
+    raise ValueError(f"No files found for pattern: {motion_file}")
 
 
 class MotionLoader:
     """
     Helper class to load and sample motion data from NumPy-file format.
-    Supports loading multiple files implicitly through glob wildcard in `motion_file`.
+    Supports loading multiple files via:
+    - YAML config file with motion_files list
+    - Glob wildcard patterns (*, ?)
+    - Directory paths
+    - Individual file paths
+    - Comma-separated file paths
     """
 
     def __init__(self, motion_file: str, device: torch.device) -> None:
-        if "*" in motion_file or "?" in motion_file:
-            files = sorted(glob.glob(motion_file))
-        elif os.path.isdir(motion_file):
-            files = sorted(glob.glob(os.path.join(motion_file, "*.npz")))
-        else:
-            files = [motion_file]
-
-        assert len(files) > 0, f"No files found for pattern: {motion_file}"
+        files = _resolve_motion_files(motion_file)
+        print(f"Loading {len(files)} motion file(s) from: {motion_file}")
 
         self.device = device
 

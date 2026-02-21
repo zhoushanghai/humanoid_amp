@@ -165,5 +165,5 @@ class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
 @configclass
 class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 10.0
-    motion_file = "/home/hz/datasets/g1_amp_nzp/*walk*.npz"
+    motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
