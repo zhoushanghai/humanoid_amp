@@ -167,3 +167,4 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 5.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
+    track_vel_range = (1.0, 1.0)
