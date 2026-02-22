@@ -91,8 +91,7 @@ python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
 python -m humanoid_amp.play \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --num_envs 32 \
-  --checkpoint logs/skrl/g1_amp_dance/2026-02-21_22-25-06_ppo_torch/checkpoints/agent_110000.pt
-
+  --checkpoint /home/hz/g1/humanoid_amp/logs/skrl/g1_amp_dance/2026-02-21_23-33-40_ppo_torch/checkpoints/agent_1425000.pt
   walk1_subject1.npz: 15459 frames, 257.65 sec, fps=60
   walk1_subject2.npz: 15459 frames, 257.65 sec, fps=60
   walk1_subject5.npz: 15459 frames, 257.65 sec, fps=60
