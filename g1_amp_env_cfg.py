@@ -37,7 +37,9 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     track_vel_range = (0.0, 0.0)
 
     # spaces
-    observation_space = 71  # originally 83, now 71 after moving key_body_positions to amp_obs
+    observation_space = (
+        71  # originally 83, now 71 after moving key_body_positions to amp_obs
+    )
     action_space = 29
     state_space = 0
     num_amp_observations = 2
@@ -153,7 +155,7 @@ class G1AmpCustomEnvCfg(G1AmpEnvCfg_CUSTOM):
 
 @configclass
 class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
-    episode_length_s = 20.0
+    episode_length_s = 10.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
     track_vel_range = (1.0, 1.0)
