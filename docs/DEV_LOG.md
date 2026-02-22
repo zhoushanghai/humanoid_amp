@@ -73,3 +73,14 @@ python -m humanoid_amp.play \
   walk3_subject4.npz: 14577 frames, 242.95 sec, fps=60
   walk3_subject5.npz: 14577 frames, 242.95 sec, fps=60
   walk4_subject1.npz: 9615 frames, 160.25 sec, fps=60
+
+  ---
+  2026 年 2 月 22 日 21:15:56
+  discriminator的历史帧数从10帧变成2帧。
+  有点抽象，机器人开始跳
+  我看了一下mimickit也是设的是10帧。
+
+不行，机器人还是一直学的只是跳的方式。
+
+2026 年 2 月 22 日 22:58:44
+恢复 10 帧，但是
