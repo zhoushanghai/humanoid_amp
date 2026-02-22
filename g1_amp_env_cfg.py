@@ -37,7 +37,7 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     track_vel_range = (0.0, 0.0)
 
     # spaces
-    observation_space = 71 + 3 * (8 + 5) - 6 + 1  # add progress feature
+    observation_space = 71  # originally 83, now 71 after moving key_body_positions to amp_obs
     action_space = 29
     state_space = 0
     num_amp_observations = 2
@@ -97,7 +97,7 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     )  # how often to resample target velocities in seconds
 
     # spaces (Observation now includes 2D command velocity, AMP observation does not)
-    observation_space = 85
+    observation_space = 73
     action_space = 29
     state_space = 0
     num_amp_observations = 10

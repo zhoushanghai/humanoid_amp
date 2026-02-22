@@ -158,11 +158,14 @@ class G1AmpEnv(DirectRLEnv):
             "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
         }
 
+        # remove key_body_positions (last 12 dims) from actor obs
+        actor_obs = obs[:, :-12]
+
         # append command target speed to policy obs if enabled
         if self.cfg.rew_track_vel > 0.0:
-            obs = torch.cat([obs, self.command_target_speed], dim=-1)
+            actor_obs = torch.cat([actor_obs, self.command_target_speed], dim=-1)
 
-        return {"policy": obs}
+        return {"policy": actor_obs}
 
     # def _get_rewards(self) -> torch.Tensor:
     #     return torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
