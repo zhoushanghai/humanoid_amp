@@ -91,13 +91,3 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_g1_deploy_amp_cfg.yaml",
     },
 )
-gym.register(
-    id="Isaac-G1-AMP-Speed-Direct-v0",
-    entry_point=f"{__name__}.g1_amp_env:G1AmpEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": f"{__name__}.g1_amp_env_cfg:G1AmpSpeedEnvCfg",
-        "skrl_amp_cfg_entry_point": f"{agents.__name__}:skrl_g1_custom_amp_cfg.yaml",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_g1_custom_amp_cfg.yaml",
-    },
-)
