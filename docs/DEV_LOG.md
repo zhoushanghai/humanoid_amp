@@ -47,44 +47,12 @@ python motions/motion_replayer.py \
 
 
 
----
- speed
-```
-python -m humanoid_amp.train --task Isaac-G1-AMP-Speed-Direct-v0 --headless 
-
-
-python -m humanoid_amp.train --task Isaac-G1-AMP-Speed-Direct-v0 --headless \
- --checkpoint logs/skrl/g1_amp_dance/2026-02-14_04-58-01_ppo_torch/checkpoints/agent_450000.pt
-```
-paly
-
 python -m humanoid_amp.play \
 --task Isaac-G1-AMP-Custom-Direct-v0 \
 --num_envs 32 \
 --checkpoint logs/skrl/g1_amp_dance/2026-02-14_04-58-01_ppo_torch/checkpoints/agent_450000.pt
 
----
-python -m humanoid_amp.play_velocity_track \
-  --task Isaac-G1-AMP-Speed-Direct-v0 \
-  --num_envs 1 \
-  --video \
-  --video_length 400 \
-  --target_vel 1.0 \
-  --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt \
-  --headless
 
-python -m humanoid_amp.play_velocity_track \
-  --task Isaac-G1-AMP-Speed-Direct-v0 \
-  --num_envs 1 \
-  --headless \
-  --target_vel 1.0 \
-  --warmup_steps 50 \
-  --video \
-  --video_length 400 \
-  --checkpoint logs/skrl/g1_amp_dance/2026-02-14_05-15-31_ppo_torch/checkpoints/agent_450000.pt
-
-
----
 拼接 12 条 walk 数据集
 python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
 
