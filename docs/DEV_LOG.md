@@ -80,3 +80,6 @@ python -m humanoid_amp.play \
   训不出来
 
   先不加上lastaction 呢？
+  好像也训不出来
+
+  测试只加last action，但不加历史

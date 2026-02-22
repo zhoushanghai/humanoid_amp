@@ -100,9 +100,9 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     )  # how often to resample target velocities in seconds
 
     # spaces
-    # per-frame actor obs: 71 (base) + 29 (last_actions) + 2 (cmd) = 102
-    # stacked 5 frames: 102 * 5 = 510
-    observation_space = 510
+    # per-frame actor obs: 71 (base) + 2 (cmd) = 73
+    # stacked 5 frames: 73 * 5 = 365
+    observation_space = 365
     action_space = 29
     state_space = 0
     num_amp_observations = 10

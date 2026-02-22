@@ -93,12 +93,10 @@ class G1AmpEnv(DirectRLEnv):
         # actor observation history buffer (used when num_actor_observations > 1)
         self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
         if self.cfg.num_actor_observations > 1:
-            # per-frame: base_obs (no key_body_pos) + last_actions + command
+            # per-frame: base_obs (no key_body_pos) + command
             base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
             command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
-            self.actor_obs_per_frame = (
-                base_obs_size + self.cfg.action_space + command_size
-            )
+            self.actor_obs_per_frame = base_obs_size + command_size
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
@@ -186,8 +184,8 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs: base + last_actions + command
-            per_frame_parts = [base_actor_obs, self.last_actions]
+            # build per-frame actor obs: base + command (no last_actions)
+            per_frame_parts = [base_actor_obs]
             if self.cfg.rew_track_vel > 0.0:
                 per_frame_parts.append(self.command_target_speed)
             per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
