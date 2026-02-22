@@ -506,6 +506,7 @@ def compute_policy_obs(
         dof_positions,  # 29 dims
         dof_velocities,  # 29 dims
         projected_gravity,  # 3 dims
+        quaternion_to_tangent_and_normal(root_rotations),  # 6 dims
         root_linear_velocities,  # 3 dims
         root_angular_velocities,  # 3 dims
         (key_body_positions - root_positions.unsqueeze(-2)).view(
