@@ -199,8 +199,8 @@ class G1AmpEnv(DirectRLEnv):
 
             actor_obs = self.actor_obs_history_buffer.view(self.num_envs, -1)
         else:
-            # original single-frame behavior (no last_actions)
-            actor_obs = base_actor_obs
+            # single-frame with last_actions
+            actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
             if self.cfg.rew_track_vel > 0.0:
                 actor_obs = torch.cat(
                     [actor_obs, self.command_target_speed], dim=-1

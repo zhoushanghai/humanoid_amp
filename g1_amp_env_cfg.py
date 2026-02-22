@@ -100,14 +100,14 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     )  # how often to resample target velocities in seconds
 
     # spaces
-    # per-frame actor obs: 71 (base) + 2 (cmd) = 73
-    # stacked 5 frames: 73 * 5 = 365
-    observation_space = 365
+    # per-frame actor obs: 71 (base) + 29 (last_actions) + 2 (cmd) = 102
+    # single frame (no history stacking)
+    observation_space = 102
     action_space = 29
     state_space = 0
     num_amp_observations = 10
     amp_observation_space = 83
-    num_actor_observations = 5  # number of stacked frames for actor input
+    num_actor_observations = 1  # single frame, no history stacking
 
     early_termination = True
     termination_height = 0.5
