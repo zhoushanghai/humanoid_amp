@@ -13,7 +13,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import quat_apply
+from isaaclab.utils.math import quat_apply, quat_rotate_inverse
 
 from .g1_amp_env_cfg import G1AmpEnvCfg
 from .motions import MotionLoader
@@ -170,8 +170,12 @@ class G1AmpEnv(DirectRLEnv):
 
         # ================= speed tracking reward ==========================
         if self.cfg.rew_track_vel > 0.0:
-            # calculate planar speed (2D: vx, vy)
-            current_speed = self.robot.data.body_lin_vel_w[:, self.ref_body_index, :2]
+            # calculate planar speed (2D: vx, vy) in local frame
+            current_speed_w = self.robot.data.body_lin_vel_w[:, self.ref_body_index]
+            current_quat_w = self.robot.data.body_quat_w[:, self.ref_body_index]
+            current_speed_b = quat_rotate_inverse(current_quat_w, current_speed_w)
+            current_speed = current_speed_b[:, :2]
+            
             # error is the norm of the difference vector
             track_vel_error = torch.norm(
                 current_speed - self.command_target_speed, dim=-1
