@@ -85,6 +85,23 @@ python -m humanoid_amp.play_velocity_track \
 
 
 ---
+最终送入 Actor 网络的观测维度为： 单帧特征维度 (95 维) × 历史帧数 (5 帧) = 475 维。
+
+其中，**每一帧（95 维）**的具体内容依次拼接如下：
+
+dof_positions (29 维): 机器人的 29 个关节局部坐标角。
+dof_velocities (29 维): 机器人的 29 个关节角速度。
+projected_gravity (3 维): 【新增特征】将全局重力方向 $(0, 0, -1)$ 投影到机器人本体局部坐标系中，主要反映机器人的 Roll 和 Pitch 倾斜状态，忽略了全局 Yaw 朝向。
+root_angular_velocities (3 维): 根节点（骨盆）的三维角速度。
+last_actions (29 维): 【新增特征】网络在上一控制步输出的动作指令。
+command_target_speed (2 维): 如果开启了速度奖励追踪，则拼接指令下发的机器人局部坐标系下的目标前向和侧向速度。
+在具体环境步进和传输给网络时，环境会在每个 step 更新 self.obs_history_buffer（形状为 [num_envs, 5, 95]），提取最近 5 步的数据将其展平为一维（也就是上述对应的 475），再送给 policy。
+
+这些特征获取全都在我们刚刚写的 g1_amp_env.py 的 compute_policy_obs 方法中。你可以检查或者跑一下看看实际效果如何！
+
+
+
+
 拼接 12 条 walk 数据集
 python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
 

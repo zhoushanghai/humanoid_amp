@@ -96,8 +96,13 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
         7.0,
     )  # how often to resample target velocities in seconds
 
-    # spaces (Observation now includes 2D command velocity, AMP observation does not)
-    observation_space = 85
+    # spaces (Observation now includes history and different features, AMP observation does not)
+    # dof_pos(29) + dof_vel(29) + projected_gravity(3) + root_angular_vel(3) + last_action(29) = 93
+    # If velocity tracking is enabled, adds +2 per frame
+    # Single frame observation: 93 (or 95 if track_vel_range is set)
+    single_obs_dim = 93 + 2
+    history_steps = 5
+    observation_space = single_obs_dim * history_steps
     action_space = 29
     state_space = 0
     num_amp_observations = 10
@@ -157,8 +162,8 @@ class G1AmpSpeedEnvCfg(G1AmpEnvCfg_CUSTOM):
     motion_file = os.path.join(MOTIONS_DIR, "custom_motion.npz")
     rew_track_vel = 1.0
     track_vel_range = (1.0, 1.0)
-    # add target speed to observation space
-    observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
+    # add target speed to observation space (single frame was 93 + 2, history 5)
+    observation_space = (93 + 2) * 5
     amp_observation_space = 71 + 3 * (8 + 5) - 6 + 1 + 1
 
 

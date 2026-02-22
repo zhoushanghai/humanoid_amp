@@ -13,7 +13,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import quat_apply, quat_rotate_inverse
+from isaaclab.utils.math import quat_apply, quat_apply_inverse
 
 from .g1_amp_env_cfg import G1AmpEnvCfg
 from .motions import MotionLoader
@@ -64,6 +64,19 @@ class G1AmpEnv(DirectRLEnv):
         self.amp_observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.amp_observation_size,)
         )
+
+        # Policy Observation setup
+        self.single_obs_dim = (
+            self.cfg.observation_space // 5
+        )  # assuming 5 history steps from cfg
+        self.history_steps = 5
+        self.obs_history_buffer = torch.zeros(
+            (self.num_envs, self.history_steps, self.single_obs_dim), device=self.device
+        )
+        self.last_actions = torch.zeros(
+            (self.num_envs, self.cfg.action_space), device=self.device
+        )
+
         self.amp_observation_buffer = torch.zeros(
             (
                 self.num_envs,
@@ -134,12 +147,35 @@ class G1AmpEnv(DirectRLEnv):
             )
 
     def _apply_action(self):
+        self.last_actions = self.actions.clone()
         # self.pre_actions = self.actions.clone()
         target = self.action_offset + self.action_scale * self.actions
         self.robot.set_joint_position_target(target)
 
     def _get_observations(self) -> dict:
-        obs = compute_obs(
+        current_obs = compute_policy_obs(
+            self.robot.data.joint_pos,
+            self.robot.data.joint_vel,
+            self.robot.data.body_quat_w[:, self.ref_body_index],
+            self.robot.data.body_ang_vel_w[:, self.ref_body_index],
+            self.last_actions,
+        )
+
+        # append command target speed to policy obs if enabled
+        if self.cfg.rew_track_vel > 0.0:
+            current_obs = torch.cat([current_obs, self.command_target_speed], dim=-1)
+
+        # update policy observation history
+        for i in reversed(range(self.history_steps - 1)):
+            self.obs_history_buffer[:, i + 1] = self.obs_history_buffer[:, i].clone()
+        self.obs_history_buffer[:, 0] = current_obs
+
+        # flatten over history dimension
+        policy_obs_flat = self.obs_history_buffer.view(
+            -1, self.history_steps * self.single_obs_dim
+        )
+
+        amp_obs = compute_obs(
             self.robot.data.joint_pos,
             self.robot.data.joint_vel,
             self.robot.data.body_pos_w[:, self.ref_body_index],
@@ -152,17 +188,12 @@ class G1AmpEnv(DirectRLEnv):
         # update AMP observation history
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
-        # build AMP observation
-        self.amp_observation_buffer[:, 0] = obs.clone()
+        self.amp_observation_buffer[:, 0] = amp_obs.clone()
         self.extras = {
             "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
         }
 
-        # append command target speed to policy obs if enabled
-        if self.cfg.rew_track_vel > 0.0:
-            obs = torch.cat([obs, self.command_target_speed], dim=-1)
-
-        return {"policy": obs}
+        return {"policy": policy_obs_flat}
 
     # def _get_rewards(self) -> torch.Tensor:
     #     return torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
@@ -175,7 +206,7 @@ class G1AmpEnv(DirectRLEnv):
             body_quat_w = self.robot.data.body_quat_w[:, self.ref_body_index]
 
             # project velocity to body local frame
-            local_vel = quat_rotate_inverse(body_quat_w, body_vel_w)
+            local_vel = quat_apply_inverse(body_quat_w, body_vel_w)
             current_speed_local = local_vel[:, :2]
 
             # error is the norm of the difference vector
@@ -259,6 +290,10 @@ class G1AmpEnv(DirectRLEnv):
             env_ids = self.robot._ALL_INDICES
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
+
+        # reset buffers
+        self.obs_history_buffer[env_ids] = 0.0
+        self.last_actions[env_ids] = 0.0
 
         if self.cfg.reset_strategy == "default":
             root_state, joint_pos, joint_vel = self._reset_strategy_default(env_ids)
@@ -447,6 +482,30 @@ def exp_reward_with_floor(
 
     # choose the corresponding reward function based on the error size
     return torch.where(error > threshold, linear_reward, exp_reward)
+
+
+@torch.jit.script
+def compute_policy_obs(
+    dof_positions: torch.Tensor,
+    dof_velocities: torch.Tensor,
+    root_rotations: torch.Tensor,
+    root_angular_velocities: torch.Tensor,
+    last_actions: torch.Tensor,
+) -> torch.Tensor:
+    gravity_w = torch.zeros_like(root_rotations[..., :3])
+    gravity_w[..., 2] = -1.0
+    projected_gravity = quat_apply_inverse(root_rotations, gravity_w)
+
+    obs_list = [
+        dof_positions,  # 29 dims
+        dof_velocities,  # 29 dims
+        projected_gravity,  # 3 dims
+        root_angular_velocities,  # 3 dims
+        last_actions,  # 29 dims
+    ]
+
+    obs = torch.cat(obs_list, dim=-1)
+    return obs
 
 
 @torch.jit.script
