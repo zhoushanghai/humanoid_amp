@@ -73,3 +73,10 @@ python -m humanoid_amp.play \
   walk3_subject4.npz: 14577 frames, 242.95 sec, fps=60
   walk3_subject5.npz: 14577 frames, 242.95 sec, fps=60
   walk4_subject1.npz: 9615 frames, 160.25 sec, fps=60
+
+  --- 
+  2026/02/22
+  Actor的输入加上last_actions (29)	然后加上了历史
+  训不出来
+
+  先不加上lastaction 呢？

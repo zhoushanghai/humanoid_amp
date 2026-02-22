@@ -44,6 +44,7 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     state_space = 0
     num_amp_observations = 2
     amp_observation_space = 71 + 3 * 10
+    num_actor_observations = 1  # number of stacked frames for actor input
 
     early_termination = True
     termination_height = 0.5
@@ -98,12 +99,15 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
         7.0,
     )  # how often to resample target velocities in seconds
 
-    # spaces (Observation now includes 2D command velocity, AMP observation does not)
-    observation_space = 73
+    # spaces
+    # per-frame actor obs: 71 (base) + 29 (last_actions) + 2 (cmd) = 102
+    # stacked 5 frames: 102 * 5 = 510
+    observation_space = 510
     action_space = 29
     state_space = 0
     num_amp_observations = 10
     amp_observation_space = 83
+    num_actor_observations = 5  # number of stacked frames for actor input
 
     early_termination = True
     termination_height = 0.5

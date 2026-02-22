@@ -85,6 +85,29 @@ class G1AmpEnv(DirectRLEnv):
             self.num_envs, dtype=torch.float32, device=self.device
         )
 
+        # last actions buffer (always maintained)
+        self.last_actions = torch.zeros(
+            (self.num_envs, self.cfg.action_space), device=self.device
+        )
+
+        # actor observation history buffer (used when num_actor_observations > 1)
+        self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
+        if self.cfg.num_actor_observations > 1:
+            # per-frame: base_obs (no key_body_pos) + last_actions + command
+            base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
+            command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
+            self.actor_obs_per_frame = (
+                base_obs_size + self.cfg.action_space + command_size
+            )
+            self.actor_obs_history_buffer = torch.zeros(
+                (
+                    self.num_envs,
+                    self.cfg.num_actor_observations,
+                    self.actor_obs_per_frame,
+                ),
+                device=self.device,
+            )
+
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
         # add ground plane
@@ -134,9 +157,10 @@ class G1AmpEnv(DirectRLEnv):
             )
 
     def _apply_action(self):
-        # self.pre_actions = self.actions.clone()
         target = self.action_offset + self.action_scale * self.actions
         self.robot.set_joint_position_target(target)
+        # record the applied actions for use in the next observation step
+        self.last_actions = self.actions.clone()
 
     def _get_observations(self) -> dict:
         obs = compute_obs(
@@ -152,18 +176,37 @@ class G1AmpEnv(DirectRLEnv):
         # update AMP observation history
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
-        # build AMP observation
+        # build AMP observation (full obs including key_body_positions)
         self.amp_observation_buffer[:, 0] = obs.clone()
         self.extras = {
             "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
         }
 
-        # remove key_body_positions (last 12 dims) from actor obs
-        actor_obs = obs[:, :-12]
+        # remove key_body_positions (last key_body_obs_size dims) from base actor obs
+        base_actor_obs = obs[:, : -self.key_body_obs_size]
 
-        # append command target speed to policy obs if enabled
-        if self.cfg.rew_track_vel > 0.0:
-            actor_obs = torch.cat([actor_obs, self.command_target_speed], dim=-1)
+        if self.cfg.num_actor_observations > 1:
+            # build per-frame actor obs: base + last_actions + command
+            per_frame_parts = [base_actor_obs, self.last_actions]
+            if self.cfg.rew_track_vel > 0.0:
+                per_frame_parts.append(self.command_target_speed)
+            per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
+
+            # shift history and prepend current frame
+            for i in reversed(range(self.cfg.num_actor_observations - 1)):
+                self.actor_obs_history_buffer[:, i + 1] = (
+                    self.actor_obs_history_buffer[:, i]
+                )
+            self.actor_obs_history_buffer[:, 0] = per_frame_actor_obs
+
+            actor_obs = self.actor_obs_history_buffer.view(self.num_envs, -1)
+        else:
+            # original single-frame behavior (no last_actions)
+            actor_obs = base_actor_obs
+            if self.cfg.rew_track_vel > 0.0:
+                actor_obs = torch.cat(
+                    [actor_obs, self.command_target_speed], dim=-1
+                )
 
         return {"policy": actor_obs}
 
@@ -274,6 +317,11 @@ class G1AmpEnv(DirectRLEnv):
         self.robot.write_root_link_pose_to_sim(root_state[:, :7], env_ids)
         self.robot.write_root_com_velocity_to_sim(root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
+
+        # reset last_actions and actor obs history for the reset envs
+        self.last_actions[env_ids] = 0.0
+        if self.cfg.num_actor_observations > 1:
+            self.actor_obs_history_buffer[env_ids] = 0.0
 
     # reset strategies
 
