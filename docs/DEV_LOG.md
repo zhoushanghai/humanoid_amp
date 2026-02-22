@@ -54,7 +54,7 @@ python -m humanoid_amp.play \
 
 
 拼接 12 条 walk 数据集
-python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
+
 
 python -m humanoid_amp.play \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
