@@ -159,6 +159,9 @@ class G1AmpEnv(DirectRLEnv):
             self.robot.data.body_quat_w[:, self.ref_body_index],
             self.robot.data.body_ang_vel_w[:, self.ref_body_index],
             self.last_actions,
+            self.robot.data.body_lin_vel_w[:, self.ref_body_index],
+            self.robot.data.body_pos_w[:, self.key_body_indexes],
+            self.robot.data.body_pos_w[:, self.ref_body_index],
         )
 
         # append command target speed to policy obs if enabled
@@ -491,6 +494,9 @@ def compute_policy_obs(
     root_rotations: torch.Tensor,
     root_angular_velocities: torch.Tensor,
     last_actions: torch.Tensor,
+    root_linear_velocities: torch.Tensor,
+    key_body_positions: torch.Tensor,
+    root_positions: torch.Tensor,
 ) -> torch.Tensor:
     gravity_w = torch.zeros_like(root_rotations[..., :3])
     gravity_w[..., 2] = -1.0
@@ -500,7 +506,11 @@ def compute_policy_obs(
         dof_positions,  # 29 dims
         dof_velocities,  # 29 dims
         projected_gravity,  # 3 dims
+        root_linear_velocities,  # 3 dims
         root_angular_velocities,  # 3 dims
+        (key_body_positions - root_positions.unsqueeze(-2)).view(
+            key_body_positions.shape[0], -1
+        ),  # 12 dims
         last_actions,  # 29 dims
     ]
 
