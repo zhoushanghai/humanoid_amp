@@ -25,8 +25,8 @@ The goal is to include `last_actions` in the observation history buffer for the 
 
 ## Checklist
 
-- [x] Update `observation_space` in `G1AmpDeployEnvCfg` <!-- id: 0 -->
-- [x] Add `self.last_actions` to `per_frame_parts` in `_get_observations` <!-- id: 1 -->
+- ✅ ~~Update `observation_space` in `G1AmpDeployEnvCfg`~~ <!-- id: 0 -->
+- ✅ ~~Add `self.last_actions` to `per_frame_parts` in `_get_observations`~~ <!-- id: 1 -->
 - [ ] Verify changes with `play.py` <!-- id: 2 -->
 
 ## Verification Plan

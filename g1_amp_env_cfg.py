@@ -172,7 +172,15 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     rew_joint_vel_l2 = 0.0
     rew_track_vel = 1.0
 
-    # 2-frame history for policy input
-    # per-frame: 71 (base_obs) + 2 (cmd) = 73; total: 73 * 2 = 146
+    # ✅ 只需修改这一个值来控制历史帧数，observation_space 会自动换算
     num_actor_observations = 2
-    observation_space = 204
+
+    def __post_init__(self):
+        # 4 key bodies × 3 dims = 12，这部分从 AMP obs 中去除，不进入 actor obs
+        _KEY_BODY_OBS_SIZE = 4 * 3
+        base_obs_size = self.amp_observation_space - _KEY_BODY_OBS_SIZE  # 71
+        command_size = 2 if self.rew_track_vel > 0.0 else 0  # 2
+        # per-frame: 71 (base) + 29 (last_actions) + 2 (cmd) = 102
+        per_frame = base_obs_size + self.action_space + command_size
+        # total: per_frame × num_actor_observations
+        self.observation_space = per_frame * self.num_actor_observations

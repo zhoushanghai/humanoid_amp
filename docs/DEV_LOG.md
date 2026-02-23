@@ -95,6 +95,22 @@ python -m humanoid_amp.play \
 ## 关键命令
 
 - **[2026-02-23]** `git commit`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
+- **[2026-02-23]** `git commit`: feat(env,cfg): add last_actions to policy history for 2-frame input / 策略历史输入中增加上一步动作感知
+
+## 工具优化
+
+- **Date**: 2026-02-23
+- **Action**: 优化 `play_deploy.sh` 与新增辅助脚本 `scripts/find_latest_checkpoint.py`。
+- **Details**:
+    - `play_deploy.sh`: 添加自动搜索逻辑，无需参数即可运行；配置集中在头部 `LOG_BASE`、`TASK`、`NUM_ENVS`。
+    - `scripts/find_latest_checkpoint.py`: 自动搜索最新日志目录（按文件名排序 = 时间排序）和最大 Step的 Checkpoint。
+    - 项目专属配置（`CHECKPOINT_SUBDIR` / `CHECKPOINT_PATTERN` / `STEP_REGEX`）集中在脚本顶部，方便移植到其他项目。
+- **运行命令**:
+
+```bash
+./play_deploy.sh               # 自动搜索最新 checkpoint
+./play_deploy.sh <ckpt_path>   # 手动指定
+```
 
 ## Configuration Change
 
@@ -107,3 +123,16 @@ python -m humanoid_amp.play \
         - 修改 `__init__` 以在 `self.actor_obs_per_frame` 中包含 `last_action_size`。
         - 修改 `_get_observations`，在堆叠历史帧时将 `self.last_actions` 包含在 `per_frame_parts` 中。
 - **Purpose**: 为策略提供过去动作的感知，有助于提高控制的平滑性和动态响应能力。
+
+## Bug Fix
+
+- **Date**: 2026-02-23
+- **Action**: 修复历史 Buffer 在 Episode 重置时被全部清零的问题（零值污染 RunningStandardScaler）。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+        - `__init__`：新增 `_just_reset_mask` 布尔张量，用于标记刚被重置的环境。
+        - `_reset_idx`：不再直接将 `actor_obs_history_buffer` 归零，改为设置 `_just_reset_mask`。
+        - `_get_observations`：在正常 shift 前，对 `_just_reset_mask` 为 True 的环境，
+          将所有历史槽用当前帧的真实观测值预填充（Warm-Start），消除异常零值输入。
+- **Root Cause**: Episode 开始时历史帧全为零，与真实观测量级差异极大，
+  导致归一化统计被污染，策略无法从历史帧中学到有意义的信息。

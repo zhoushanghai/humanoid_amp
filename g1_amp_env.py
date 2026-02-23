@@ -106,6 +106,10 @@ class G1AmpEnv(DirectRLEnv):
                 ),
                 device=self.device,
             )
+            # mask: True for envs that were just reset and need history warm-start
+            self._just_reset_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -190,6 +194,15 @@ class G1AmpEnv(DirectRLEnv):
             if self.cfg.rew_track_vel > 0.0:
                 per_frame_parts.append(self.command_target_speed)
             per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
+
+            # warm-start: for just-reset envs, fill ALL history slots with
+            # the current real observation, eliminating the zero-value anomaly.
+            if self._just_reset_mask.any():
+                for i in range(self.cfg.num_actor_observations):
+                    self.actor_obs_history_buffer[self._just_reset_mask, i] = (
+                        per_frame_actor_obs[self._just_reset_mask]
+                    )
+                self._just_reset_mask[:] = False
 
             # shift history and prepend current frame
             for i in reversed(range(self.cfg.num_actor_observations - 1)):
@@ -315,10 +328,13 @@ class G1AmpEnv(DirectRLEnv):
         self.robot.write_root_com_velocity_to_sim(root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
-        # reset last_actions and actor obs history for the reset envs
+        # reset last_actions for the reset envs
         self.last_actions[env_ids] = 0.0
         if self.cfg.num_actor_observations > 1:
-            self.actor_obs_history_buffer[env_ids] = 0.0
+            # do NOT zero the buffer here; instead mark these envs so
+            # _get_observations will warm-start the buffer with the real
+            # first observation on the next step.
+            self._just_reset_mask[env_ids] = True
 
     # reset strategies
 
