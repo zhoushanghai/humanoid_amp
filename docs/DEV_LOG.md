@@ -87,4 +87,12 @@ python -m humanoid_amp.play \
 不过最终还是会像走路
 最后的效果让他训一晚上吧
 效果好像还可以,他开始交叉腿走了
+
 效果都是差不多的，还是可以走路，但是不能学会交叉腿。
+
+
+加上历史帧数，但只有两针，他就学不会了
+## 关键命令
+
+- **[2026-02-23]** \`git commit\`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
+
