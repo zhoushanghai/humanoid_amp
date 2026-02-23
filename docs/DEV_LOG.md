@@ -96,6 +96,8 @@ python -m humanoid_amp.play \
 
 - **[2026-02-23]** `git commit`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
 - **[2026-02-23]** `git commit`: feat(env,cfg): add last_actions to policy history for 2-frame input / 策略历史输入中增加上一步动作感知
+- **[2026-02-23]** `git commit`: feat(play,env,cfg): 新增部署推理脚本并更新多历史帧环境配置 / add play_deploy.py, update env & cfg for multi-history obs
+- **[2026-02-23]** `git commit`: docs(ablation): 记录实验②成功并准备实验③ / record success of phase ② and prep phase ③
 
 ## 工具优化
 
@@ -136,3 +138,31 @@ python -m humanoid_amp.play \
           将所有历史槽用当前帧的真实观测值预填充（Warm-Start），消除异常零值输入。
 - **Root Cause**: Episode 开始时历史帧全为零，与真实观测量级差异极大，
   导致归一化统计被污染，策略无法从历史帧中学到有意义的信息。
+## Bug Fix & Root Cause Analysis
+
+- **Date**: 2026-02-23
+- **Action**: 诊断并修复 `num_actor_observations=2` 时训练失败（Policy Std 水平线）的根本原因。
+- **Root Cause**: `agents/skrl_g1_deploy_amp_cfg.yaml` 中 `fixed_log_std: True`，Policy 的探索噪声 std 被永久固定在 `exp(-2.9) ≈ 0.055`，完全不随梯度更新。这就是 TensorBoard 中 `Policy / Standard Deviation` 曲线始终水平不变的原因。在 `n=1` 时任务简单尚能收敛；`n=2` 时任务难度加倍，固定的极小 std 使得 Policy 无法有效探索，梯度信号极弱，导致完全训不出来。
+- **Fix**: 修改 `agents/skrl_g1_deploy_amp_cfg.yaml`：
+    - `fixed_log_std: True` → `fixed_log_std: False`（允许 std 随训练自适应更新）
+    - `initial_log_std: -2.9` → `initial_log_std: -1.0`（初始 std 从 0.055 提升至 0.37，提供合理的初始探索幅度）
+
+## Experiment Record: Ablation Study - Phase ②
+- **Date**: 2026-02-23 19:10
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-23_17-26-04_ppo_torch/checkpoints/agent_185000.pt`
+- **Configuration**:
+    - `num_actor_observations = 2`
+    - `history_include_last_actions = False`
+    - `history_include_command = False`
+    - `observation_space = 173`
+- **Phenomenon**: 策略成功训练 (Standard Deviation 正常波动，Reward 持续上升)。
+- **Conclusion**: 机制验证通过，纯运动学历史信息（71维）可以正常训练。
+
+## Upcoming Experiment: Ablation Study - Phase ③
+- **Action**: 在历史帧中加入 `last_actions` (29维)。
+- **Configuration**:
+    - `num_actor_observations = 2`
+    - `history_include_last_actions = True`
+    - `history_include_command = False`
+    - `observation_space = 202`
+- **Purpose**: 测试过去动作信息加入历史帧后是否会引入训练不稳定性。

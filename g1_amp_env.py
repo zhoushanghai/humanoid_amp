@@ -93,20 +93,27 @@ class G1AmpEnv(DirectRLEnv):
         # actor observation history buffer (used when num_actor_observations > 1)
         self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
         if self.cfg.num_actor_observations > 1:
-            # per-frame: base_obs (no key_body_pos) + command
-            base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
+            base_obs_size = (
+                self.cfg.amp_observation_space - self.key_body_obs_size
+            )  # 71
             command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
-            last_action_size = self.cfg.action_space
-            self.actor_obs_per_frame = base_obs_size + command_size + last_action_size
+            # ablation 开关：历史帧包含哪些内容（默认 True 以兼容旧配置）
+            _inc_act = getattr(self.cfg, "history_include_last_actions", True)
+            _inc_cmd = getattr(self.cfg, "history_include_command", True)
+            self.actor_obs_hist_per_frame = base_obs_size  # A 始终包含
+            if _inc_act:
+                self.actor_obs_hist_per_frame += self.cfg.action_space
+            if _inc_cmd:
+                self.actor_obs_hist_per_frame += command_size
+            # buffer 只存储 (n-1) 个历史帧，当前帧单独处理
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
-                    self.cfg.num_actor_observations,
-                    self.actor_obs_per_frame,
+                    self.cfg.num_actor_observations - 1,
+                    self.actor_obs_hist_per_frame,
                 ),
                 device=self.device,
             )
-            # mask: True for envs that were just reset and need history warm-start
             self._just_reset_mask = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
@@ -189,29 +196,43 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs: base + last_actions + command
-            per_frame_parts = [base_actor_obs, self.last_actions]
-            if self.cfg.rew_track_vel > 0.0:
-                per_frame_parts.append(self.command_target_speed)
-            per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
+            _inc_act = getattr(self.cfg, "history_include_last_actions", True)
+            _inc_cmd = getattr(self.cfg, "history_include_command", True)
 
-            # warm-start: for just-reset envs, fill ALL history slots with
-            # the current real observation, eliminating the zero-value anomaly.
+            # 当前帧（始终完整： A + B + C）
+            current_parts = [base_actor_obs, self.last_actions]
+            if self.cfg.rew_track_vel > 0.0:
+                current_parts.append(self.command_target_speed)
+            current_frame = torch.cat(current_parts, dim=-1)
+
+            # 历史帧（由 ablation 开关决定）
+            hist_parts = [base_actor_obs]  # A 始终包含
+            if _inc_act:
+                hist_parts.append(self.last_actions)
+            if _inc_cmd and self.cfg.rew_track_vel > 0.0:
+                hist_parts.append(self.command_target_speed)
+            hist_frame = torch.cat(hist_parts, dim=-1)
+
+            # warm-start：刚重置的环境用当前历史帧填满所有历史槽
             if self._just_reset_mask.any():
-                for i in range(self.cfg.num_actor_observations):
+                for i in range(self.cfg.num_actor_observations - 1):
                     self.actor_obs_history_buffer[self._just_reset_mask, i] = (
-                        per_frame_actor_obs[self._just_reset_mask]
+                        hist_frame[self._just_reset_mask]
                     )
                 self._just_reset_mask[:] = False
 
-            # shift history and prepend current frame
-            for i in reversed(range(self.cfg.num_actor_observations - 1)):
+            # shift 历史 buffer 并写入最新历史帧
+            for i in reversed(range(self.cfg.num_actor_observations - 2)):
                 self.actor_obs_history_buffer[:, i + 1] = self.actor_obs_history_buffer[
                     :, i
                 ]
-            self.actor_obs_history_buffer[:, 0] = per_frame_actor_obs
+            self.actor_obs_history_buffer[:, 0] = hist_frame
 
-            actor_obs = self.actor_obs_history_buffer.view(self.num_envs, -1)
+            # 最终 obs = 当前帧 | 历史帧（展平）
+            actor_obs = torch.cat(
+                [current_frame, self.actor_obs_history_buffer.view(self.num_envs, -1)],
+                dim=-1,
+            )
         else:
             # single-frame with last_actions
             actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
