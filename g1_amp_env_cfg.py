@@ -180,7 +180,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     # 实验②：两个均为 False（历史帧只含 A）
     # 实验③： history_include_last_actions=True（历史帧含 A+B）
     # 实验④：两个均为 True（历史帧完整 A+B+C）
-    history_include_last_actions: bool = False
+    history_include_last_actions: bool = True
     history_include_command: bool = False
 
     def __post_init__(self):

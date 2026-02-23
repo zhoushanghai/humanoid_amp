@@ -98,6 +98,7 @@ python -m humanoid_amp.play \
 - **[2026-02-23]** `git commit`: feat(env,cfg): add last_actions to policy history for 2-frame input / 策略历史输入中增加上一步动作感知
 - **[2026-02-23]** `git commit`: feat(play,env,cfg): 新增部署推理脚本并更新多历史帧环境配置 / add play_deploy.py, update env & cfg for multi-history obs
 - **[2026-02-23]** `git commit`: docs(ablation): 记录实验②成功并准备实验③ / record success of phase ② and prep phase ③
+- **[2026-02-23]** `git commit`: docs(ablation): 记录实验③成功并准备实验④ / record success of phase ③ and prep phase ④
 
 ## 工具优化
 
@@ -158,11 +159,22 @@ python -m humanoid_amp.play \
 - **Phenomenon**: 策略成功训练 (Standard Deviation 正常波动，Reward 持续上升)。
 - **Conclusion**: 机制验证通过，纯运动学历史信息（71维）可以正常训练。
 
-## Upcoming Experiment: Ablation Study - Phase ③
-- **Action**: 在历史帧中加入 `last_actions` (29维)。
+## Experiment Record: Ablation Study - Phase ③
+- **Date**: 2026-02-23 19:19
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-23_19-13-39_ppo_torch/checkpoints/agent_10000.pt`
 - **Configuration**:
     - `num_actor_observations = 2`
     - `history_include_last_actions = True`
     - `history_include_command = False`
     - `observation_space = 202`
-- **Purpose**: 测试过去动作信息加入历史帧后是否会引入训练不稳定性。
+- **Phenomenon**: 策略训练正常 (Std 变动，Reward 上升)。
+- **Conclusion**: `last_actions` 加入历史帧后依然稳定。
+
+## Upcoming Experiment: Ablation Study - Phase ④
+- **Action**: 在历史帧中加入 `command` (vx, vy, 2维)，实现完全一致的帧叠加。
+- **Configuration**:
+    - `num_actor_observations = 2`
+    - `history_include_last_actions = True`
+    - `history_include_command = True`
+    - `observation_space = 204`
+- **Purpose**: 最终确认 `command` 加入历史是否为之前失败的原因，或者在固定 log_std 修复后是否也能成功训练。

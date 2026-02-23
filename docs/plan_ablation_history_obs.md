@@ -52,22 +52,22 @@
 
 ---
 
-### ③ 加历史运动学 + 历史动作（🔄 当前实验）
+### ③ 加历史运动学 + 历史动作 (✅ 已通过)
 
 - **当前帧**：A + B + C
 - **历史帧**：A + B（100 维）
 - **observation_space**：202
 - **num_actor_observations**：2
 - **预期**：测试 last_actions 进入历史帧是否造成问题
-- **Checkpoint**：`logs/skrl/g1_amp_dance/_______________/checkpoints/agent______.pt`
+- **Checkpoint**：`logs/skrl/g1_amp_dance/2026-02-23_19-13-39_ppo_torch/checkpoints/agent_10000.pt`
 - **结果记录**：
-  - Policy Std：
-  - Reward 趋势：
-  - **结论**：[ ] 能训 / [ ] 不能训
+  - Policy Std：正常变化 ✅
+  - Reward 趋势：上升 ✅
+  - **结论**：[x] 能训 / [ ] 不能训
 
 ---
 
-### ④ 完整方案（当前失败配置）
+### ④ 完整方案（🔄 当前实验）
 
 - **当前帧**：A + B + C
 - **历史帧**：A + B + C（102 维，与当前帧完全一致）
