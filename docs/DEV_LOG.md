@@ -99,6 +99,7 @@ python -m humanoid_amp.play \
 - **[2026-02-23]** `git commit`: feat(play,env,cfg): 新增部署推理脚本并更新多历史帧环境配置 / add play_deploy.py, update env & cfg for multi-history obs
 - **[2026-02-23]** `git commit`: docs(ablation): 记录实验②成功并准备实验③ / record success of phase ② and prep phase ③
 - **[2026-02-23]** `git commit`: docs(ablation): 记录实验③成功并准备实验④ / record success of phase ③ and prep phase ④
+- **[2026-02-23]** `git commit`: docs(ablation): 消融实验圆满完成，记录实验④结果 / ablation study completed, record phase ④ results
 
 ## 工具优化
 
@@ -170,11 +171,23 @@ python -m humanoid_amp.play \
 - **Phenomenon**: 策略训练正常 (Std 变动，Reward 上升)。
 - **Conclusion**: `last_actions` 加入历史帧后依然稳定。
 
-## Upcoming Experiment: Ablation Study - Phase ④
-- **Action**: 在历史帧中加入 `command` (vx, vy, 2维)，实现完全一致的帧叠加。
+## Experiment Record: Ablation Study - Phase ④
+- **Date**: 2026-02-23 19:31
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-23_19-24-57_ppo_torch/checkpoints/agent_10000.pt`
 - **Configuration**:
     - `num_actor_observations = 2`
     - `history_include_last_actions = True`
     - `history_include_command = True`
     - `observation_space = 204`
-- **Purpose**: 最终确认 `command` 加入历史是否为之前失败的原因，或者在固定 log_std 修复后是否也能成功训练。
+- **Phenomenon**: 策略训练非常稳定 (Standard Deviation 动态更新，Reward 持续上升)。
+- **Conclusion**: **消融实验圆满完成**。之前 204 维训练失败并非因为维度过高或 command 历史冲突，而是由于 **History Warm-Start Bug** 和 **Fixed Log Std** 配置导致的探索受阻。
+
+## 核心修复总结 (Deep Explanation)
+为什么现在 204 维能训出来了？
+
+1. **历史帧预填充 (Warm-Start Fix)**: 
+    - 之前在 Episode 重置时，历史 buffer 会被清零。高维度的零向量输入会导致 `RunningStandardScaler` 的均值和方差被瞬间拉低，造成观测归一化异常。
+    - 现在我们使用当前帧真实观测填充所有历史槽，消除了“零值污染”。
+2. **解锁探索噪声 (Exploration Fix)**:
+    - 之前的配置 `fixed_log_std: True` 锁死了 Policy 的标准差。
+    - 现在设置为 `False` 并调大了初始 `std`，允许策略在 204 维的高维状态空间中进行充分探索。

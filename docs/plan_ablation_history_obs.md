@@ -67,18 +67,36 @@
 
 ---
 
-### ④ 完整方案（🔄 当前实验）
+### ④ 完整方案 (✅ 已通过)
 
 - **当前帧**：A + B + C
 - **历史帧**：A + B + C（102 维，与当前帧完全一致）
 - **observation_space**：204
 - **num_actor_observations**：2
-- **预期**：❌ 当前已知失败
-- **Checkpoint**：`logs/skrl/g1_amp_dance/_______________/checkpoints/agent______.pt`
+- **预期**：✅ 机制修复后已能正常训练
+- **Checkpoint**：`logs/skrl/g1_amp_dance/2026-02-23_19-24-57_ppo_torch/checkpoints/agent_10000.pt`
 - **结果记录**：
-  - Policy Std：水平线，不变
-  - Reward 趋势：不增长
-  - **结论**：[x] 不能训
+  - Policy Std：正常变化 ✅
+  - Reward 趋势：稳定上升 ✅
+  - **结论**：[x] 能训
+
+## 实施步骤 (Experiment ④)
+
+### [MODIFY] [g1_amp_env_cfg.py](file:///home/hz/g1/humanoid_amp/g1_amp_env_cfg.py)
+
+- 将 `G1AmpDeployEnvCfg` 中的 `history_include_command` 设置为 `True`。
+
+## 验证计划
+
+### 自动化验证
+- **维度检查**：启动 `train.py`，确保 `observation_space` 为 `204`。
+- **运行测试**：
+  ```bash
+  conda run -n g1_amp python -m humanoid_amp.train \
+    --task Isaac-G1-AMP-Deploy-Direct-v0 \
+    --num_envs 512 \
+    --headless
+  ```
 
 ---
 
