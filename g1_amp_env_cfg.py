@@ -175,4 +175,4 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     # 2-frame history for policy input
     # per-frame: 71 (base_obs) + 2 (cmd) = 73; total: 73 * 2 = 146
     num_actor_observations = 2
-    observation_space = 146
+    observation_space = 204

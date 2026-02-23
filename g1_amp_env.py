@@ -96,7 +96,8 @@ class G1AmpEnv(DirectRLEnv):
             # per-frame: base_obs (no key_body_pos) + command
             base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
             command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
-            self.actor_obs_per_frame = base_obs_size + command_size
+            last_action_size = self.cfg.action_space
+            self.actor_obs_per_frame = base_obs_size + command_size + last_action_size
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
@@ -184,17 +185,17 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs: base + command (no last_actions)
-            per_frame_parts = [base_actor_obs]
+            # build per-frame actor obs: base + last_actions + command
+            per_frame_parts = [base_actor_obs, self.last_actions]
             if self.cfg.rew_track_vel > 0.0:
                 per_frame_parts.append(self.command_target_speed)
             per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
 
             # shift history and prepend current frame
             for i in reversed(range(self.cfg.num_actor_observations - 1)):
-                self.actor_obs_history_buffer[:, i + 1] = (
-                    self.actor_obs_history_buffer[:, i]
-                )
+                self.actor_obs_history_buffer[:, i + 1] = self.actor_obs_history_buffer[
+                    :, i
+                ]
             self.actor_obs_history_buffer[:, 0] = per_frame_actor_obs
 
             actor_obs = self.actor_obs_history_buffer.view(self.num_envs, -1)
@@ -202,9 +203,7 @@ class G1AmpEnv(DirectRLEnv):
             # single-frame with last_actions
             actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
             if self.cfg.rew_track_vel > 0.0:
-                actor_obs = torch.cat(
-                    [actor_obs, self.command_target_speed], dim=-1
-                )
+                actor_obs = torch.cat([actor_obs, self.command_target_speed], dim=-1)
 
         return {"policy": actor_obs}
 
@@ -219,7 +218,7 @@ class G1AmpEnv(DirectRLEnv):
             current_quat_w = self.robot.data.body_quat_w[:, self.ref_body_index]
             current_speed_b = quat_rotate_inverse(current_quat_w, current_speed_w)
             current_speed = current_speed_b[:, :2]
-            
+
             # error is the norm of the difference vector
             track_vel_error = torch.norm(
                 current_speed - self.command_target_speed, dim=-1

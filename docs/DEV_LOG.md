@@ -94,5 +94,16 @@ python -m humanoid_amp.play \
 加上历史帧数，但只有两针，他就学不会了
 ## 关键命令
 
-- **[2026-02-23]** \`git commit\`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
+- **[2026-02-23]** `git commit`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
 
+## Configuration Change
+
+- **Date**: 2026-02-23
+- **Action**: 将 `last_actions` 加入 Actor 的历史观测输入中。
+- **Details**: 
+    - **文件**: `g1_amp_env_cfg.py`
+        - 修改 `G1AmpDeployEnvCfg` 的 `observation_space` 为 `204` (计算: $(71 + 29 + 2) \times 2 = 204$)。
+    - **文件**: `g1_amp_env.py`
+        - 修改 `__init__` 以在 `self.actor_obs_per_frame` 中包含 `last_action_size`。
+        - 修改 `_get_observations`，在堆叠历史帧时将 `self.last_actions` 包含在 `per_frame_parts` 中。
+- **Purpose**: 为策略提供过去动作的感知，有助于提高控制的平滑性和动态响应能力。
