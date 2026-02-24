@@ -7,45 +7,161 @@ import numpy as np
 import os
 import torch
 from typing import Optional
+import glob
+import yaml
+
+
+def _resolve_motion_files(motion_file: str) -> list[str]:
+    """Resolve motion files from various input formats.
+
+    Supports:
+    - YAML config file with motion_files list
+    - Glob patterns (*, ?)
+    - Directory paths
+    - Individual file paths
+    - Comma-separated file paths
+
+    Args:
+        motion_file: Path to config/file/pattern
+
+    Returns:
+        List of resolved file paths
+    """
+    # Check if it's a YAML config file
+    if motion_file.endswith('.yaml') or motion_file.endswith('.yml'):
+        config_dir = os.path.dirname(motion_file)
+        with open(motion_file, 'r') as f:
+            config = yaml.safe_load(f)
+
+        files = []
+        if config and 'motion_files' in config:
+            for path in config['motion_files']:
+                # Resolve relative paths based on config file location
+                if not os.path.isabs(path):
+                    path = os.path.join(config_dir, path)
+                if os.path.exists(path):
+                    files.append(path)
+                else:
+                    print(f"Warning: File not found: {path}")
+
+        # Also support glob_pattern from config
+        if not files and 'glob_pattern' in config:
+            pattern = config['glob_pattern']
+            if not os.path.isabs(pattern):
+                pattern = os.path.join(config_dir, pattern)
+            files = sorted(glob.glob(pattern))
+
+        if not files:
+            raise ValueError(f"No valid motion files found in config: {motion_file}")
+        return files
+
+    # Comma-separated files
+    if ',' in motion_file:
+        files = []
+        for f in motion_file.split(','):
+            f = f.strip()
+            if os.path.exists(f):
+                files.append(f)
+        if files:
+            return files
+
+    # Glob pattern
+    if "*" in motion_file or "?" in motion_file:
+        files = sorted(glob.glob(motion_file))
+        if files:
+            return files
+
+    # Directory
+    if os.path.isdir(motion_file):
+        files = sorted(glob.glob(os.path.join(motion_file, "*.npz")))
+        if files:
+            return files
+
+    # Single file
+    if os.path.exists(motion_file):
+        return [motion_file]
+
+    raise ValueError(f"No files found for pattern: {motion_file}")
 
 
 class MotionLoader:
     """
     Helper class to load and sample motion data from NumPy-file format.
+    Supports loading multiple files via:
+    - YAML config file with motion_files list
+    - Glob wildcard patterns (*, ?)
+    - Directory paths
+    - Individual file paths
+    - Comma-separated file paths
     """
 
     def __init__(self, motion_file: str, device: torch.device) -> None:
-        """Load a motion file and initialize the internal variables.
-
-        Args:
-            motion_file: Motion file path to load.
-            device: The device to which to load the data.
-
-        Raises:
-            AssertionError: If the specified motion file doesn't exist.
-        """
-        assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
-        data = np.load(motion_file)
+        files = _resolve_motion_files(motion_file)
+        print(f"Loading {len(files)} motion file(s) from: {motion_file}")
 
         self.device = device
-        self._dof_names = data["dof_names"].tolist()
-        self._body_names = data["body_names"].tolist()
 
-        self.dof_positions = torch.tensor(data["dof_positions"], dtype=torch.float32, device=self.device)
-        self.dof_velocities = torch.tensor(data["dof_velocities"], dtype=torch.float32, device=self.device)
-        self.body_positions = torch.tensor(data["body_positions"], dtype=torch.float32, device=self.device)
-        self.body_rotations = torch.tensor(data["body_rotations"], dtype=torch.float32, device=self.device)
+        dof_pos_list = []
+        dof_vel_list = []
+        body_pos_list = []
+        body_rot_list = []
+        body_lin_vel_list = []
+        body_ang_vel_list = []
+
+        self.traj_starts = []
+        self.traj_ends = []
+        self.durations = []
+        self.num_trajectories = len(files)
+
+        current_frame = 0
+        for f in files:
+            data = np.load(f)
+            if current_frame == 0:
+                self._dof_names = data["dof_names"].tolist()
+                self._body_names = data["body_names"].tolist()
+                self.dt = 1.0 / data["fps"]
+
+            dof_pos_list.append(data["dof_positions"])
+            dof_vel_list.append(data["dof_velocities"])
+            body_pos_list.append(data["body_positions"])
+            body_rot_list.append(data["body_rotations"])
+            body_lin_vel_list.append(data["body_linear_velocities"])
+            body_ang_vel_list.append(data["body_angular_velocities"])
+
+            n_frames = data["dof_positions"].shape[0]
+            self.traj_starts.append(current_frame)
+            current_frame += n_frames
+            self.traj_ends.append(current_frame - 1)
+            self.durations.append(self.dt * (n_frames - 1))
+
+        self.traj_starts = np.array(self.traj_starts)
+        self.traj_ends = np.array(self.traj_ends)
+        self.durations = np.array(self.durations)
+
+        self.dof_positions = torch.tensor(
+            np.concatenate(dof_pos_list), dtype=torch.float32, device=self.device
+        )
+        self.dof_velocities = torch.tensor(
+            np.concatenate(dof_vel_list), dtype=torch.float32, device=self.device
+        )
+        self.body_positions = torch.tensor(
+            np.concatenate(body_pos_list), dtype=torch.float32, device=self.device
+        )
+        self.body_rotations = torch.tensor(
+            np.concatenate(body_rot_list), dtype=torch.float32, device=self.device
+        )
         self.body_linear_velocities = torch.tensor(
-            data["body_linear_velocities"], dtype=torch.float32, device=self.device
+            np.concatenate(body_lin_vel_list), dtype=torch.float32, device=self.device
         )
         self.body_angular_velocities = torch.tensor(
-            data["body_angular_velocities"], dtype=torch.float32, device=self.device
+            np.concatenate(body_ang_vel_list), dtype=torch.float32, device=self.device
         )
 
-        self.dt = 1.0 / data["fps"]
-        self.num_frames = self.dof_positions.shape[0]
-        self.duration = self.dt * (self.num_frames - 1)
-        print(f"Motion loaded ({motion_file}): duration: {self.duration} sec, frames: {self.num_frames}")
+        self.num_frames = current_frame
+        self.duration = float(np.sum(self.durations))
+        print(
+            f"Motion loaded: {self.num_trajectories} files, total duration: {self.duration} sec, total frames: {self.num_frames}"
+        )
 
     @property
     def dof_names(self) -> list[str]:
@@ -153,77 +269,124 @@ class MotionLoader:
         new_q_z = ratio_a * q0[..., qz : qz + 1] + ratio_b * q1[..., qz : qz + 1]
         new_q_w = ratio_a * q0[..., qw : qw + 1] + ratio_b * q1[..., qw : qw + 1]
 
-        new_q = torch.cat([new_q_w, new_q_x, new_q_y, new_q_z], dim=len(new_q_w.shape) - 1)
-        new_q = torch.where(torch.abs(sin_half_theta) < 0.001, 0.5 * q0 + 0.5 * q1, new_q)
+        new_q = torch.cat(
+            [new_q_w, new_q_x, new_q_y, new_q_z], dim=len(new_q_w.shape) - 1
+        )
+        new_q = torch.where(
+            torch.abs(sin_half_theta) < 0.001, 0.5 * q0 + 0.5 * q1, new_q
+        )
         new_q = torch.where(torch.abs(cos_half_theta) >= 1, q0, new_q)
         return new_q
 
-    def _compute_frame_blend(self, times: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _compute_frame_blend(
+        self, times: np.ndarray, motion_ids: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute the indexes of the first and second values, as well as the blending time
         to interpolate between them and the given times.
 
         Args:
             times: Times, between 0 and motion duration, to sample motion values.
-                Specified times will be clipped to fall within the range of the motion duration.
+            motion_ids: Array of sequence IDs corresponding to each time.
 
         Returns:
-            First value indexes, Second value indexes, and blending time between 0 (first value) and 1 (second value).
+            First value global indexes, Second value global indexes, and blending time.
         """
-        phase = np.clip(times / self.duration, 0.0, 1.0)
-        index_0 = (phase * (self.num_frames - 1)).round(decimals=0).astype(int)
-        index_1 = np.minimum(index_0 + 1, self.num_frames - 1)
-        blend = ((times - index_0 * self.dt) / self.dt).round(decimals=5)
+        durations = self.durations[motion_ids]
+        starts = self.traj_starts[motion_ids]
+        ends = self.traj_ends[motion_ids]
+
+        phase = np.clip(times / durations, 0.0, 1.0)
+        local_index_0 = (phase * (ends - starts)).round(decimals=0).astype(int)
+        local_index_1 = np.minimum(local_index_0 + 1, ends - starts)
+
+        index_0 = starts + local_index_0
+        index_1 = starts + local_index_1
+
+        blend = ((times - local_index_0 * self.dt) / self.dt).round(decimals=5)
+
         return index_0, index_1, blend
 
-    def sample_times(self, num_samples: int, duration: float | None = None) -> np.ndarray:
-        """Sample random motion times uniformly.
+    def sample_times(
+        self, num_samples: int, start: bool = False
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample random motion times uniformly from uniformly random sequences.
 
         Args:
             num_samples: Number of time samples to generate.
-            duration: Maximum motion duration to sample.
-                If not defined samples will be within the range of the motion duration.
-
-        Raises:
-            AssertionError: If the specified duration is longer than the motion duration.
+            start: Whether to sample exactly from the start (t=0) of the sequences.
 
         Returns:
-            Time samples, between 0 and the specified/motion duration.
+            Tuple of (motion_ids, times)
         """
-        duration = self.duration if duration is None else duration
-        assert (
-            duration <= self.duration
-        ), f"The specified duration ({duration}) is longer than the motion duration ({self.duration})"
-        return duration * np.random.uniform(low=0.0, high=1.0, size=num_samples)
+        motion_ids = np.random.randint(0, self.num_trajectories, size=num_samples)
+        if start:
+            times = np.zeros(num_samples)
+        else:
+            times = (
+                np.random.uniform(low=0.0, high=1.0, size=num_samples)
+                * self.durations[motion_ids]
+            )
+        return motion_ids, times
 
     def sample(
-        self, num_samples: int, times: Optional[np.ndarray] = None, duration: float | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        num_samples: int,
+        times: Optional[np.ndarray] = None,
+        duration: float | None = None,
+        motion_ids: np.ndarray | None = None,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         """Sample motion data.
 
         Args:
-            num_samples: Number of time samples to generate. If ``times`` is defined, this parameter is ignored.
+            num_samples: Number of time samples to generate. If `times` is defined, this parameter is ignored.
             times: Motion time used for sampling.
                 If not defined, motion data will be random sampled uniformly in time.
             duration: Maximum motion duration to sample.
                 If not defined, samples will be within the range of the motion duration.
-                If ``times`` is defined, this parameter is ignored.
+                If `times` is defined, this parameter is ignored.
+            motion_ids: Array of sequence IDs corresponding to each time.
 
         Returns:
-            Sampled motion DOF positions (with shape (N, num_dofs)), DOF velocities (with shape (N, num_dofs)),
-            body positions (with shape (N, num_bodies, 3)), body rotations (with shape (N, num_bodies, 4), as wxyz quaternion),
-            body linear velocities (with shape (N, num_bodies, 3)) and body angular velocities (with shape (N, num_bodies, 3)).
+            Sampled motion DOF positions, DOF velocities,
+            body positions, body rotations,
+            body linear velocities and body angular velocities.
         """
-        times = self.sample_times(num_samples, duration) if times is None else times
-        index_0, index_1, blend = self._compute_frame_blend(times)
+        if times is None:
+            motion_ids_new, times = self.sample_times(num_samples)
+            if motion_ids is None:
+                motion_ids = motion_ids_new
+        elif motion_ids is None:
+            motion_ids = np.zeros(num_samples, dtype=np.int32)
+
+        index_0, index_1, blend = self._compute_frame_blend(
+            times, motion_ids=motion_ids
+        )
         blend = torch.tensor(blend, dtype=torch.float32, device=self.device)
 
         return (
-            self._interpolate(self.dof_positions, blend=blend, start=index_0, end=index_1),
-            self._interpolate(self.dof_velocities, blend=blend, start=index_0, end=index_1),
-            self._interpolate(self.body_positions, blend=blend, start=index_0, end=index_1),
+            self._interpolate(
+                self.dof_positions, blend=blend, start=index_0, end=index_1
+            ),
+            self._interpolate(
+                self.dof_velocities, blend=blend, start=index_0, end=index_1
+            ),
+            self._interpolate(
+                self.body_positions, blend=blend, start=index_0, end=index_1
+            ),
             self._slerp(self.body_rotations, blend=blend, start=index_0, end=index_1),
-            self._interpolate(self.body_linear_velocities, blend=blend, start=index_0, end=index_1),
-            self._interpolate(self.body_angular_velocities, blend=blend, start=index_0, end=index_1),
+            self._interpolate(
+                self.body_linear_velocities, blend=blend, start=index_0, end=index_1
+            ),
+            self._interpolate(
+                self.body_angular_velocities, blend=blend, start=index_0, end=index_1
+            ),
         )
 
     def get_dof_index(self, dof_names: list[str]) -> list[int]:
@@ -240,7 +403,9 @@ class MotionLoader:
         """
         indexes = []
         for name in dof_names:
-            assert name in self._dof_names, f"The specified DOF name ({name}) doesn't exist: {self._dof_names}"
+            assert (
+                name in self._dof_names
+            ), f"The specified DOF name ({name}) doesn't exist: {self._dof_names}"
             indexes.append(self._dof_names.index(name))
         return indexes
 
@@ -258,7 +423,9 @@ class MotionLoader:
         """
         indexes = []
         for name in body_names:
-            assert name in self._body_names, f"The specified body name ({name}) doesn't exist: {self._body_names}"
+            assert (
+                name in self._body_names
+            ), f"The specified body name ({name}) doesn't exist: {self._body_names}"
             indexes.append(self._body_names.index(name))
         return indexes
 

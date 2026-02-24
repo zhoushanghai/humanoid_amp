@@ -4,5 +4,6 @@
 logs/
 outputs/*
 *.egg-info
-AGENT.md
-datasets/
+humanoid_amp.egg-info/
+.vscode/
+.claude/

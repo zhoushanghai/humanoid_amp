@@ -12,7 +12,7 @@ It includes classes and functions for:
 Usage:
     As a module:
         from record_data import MotionRecorder, MotionData
-        
+
         recorder = MotionRecorder(robot, motion_dof_indices, fps=60)
         recorder.start_recording()
         # ... record frames ...
@@ -30,6 +30,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
+
 @dataclass
 class MotionData:
     fps: int
@@ -45,11 +46,11 @@ class MotionData:
 
 def smooth_motion_data(motion_data: MotionData, window_size: int = 3) -> MotionData:
     """Apply smoothing to motion data to reduce jitter.
-    
+
     Args:
         motion_data: Original motion data
         window_size: Size of smoothing window
-        
+
     Returns:
         Smoothed motion data
     """
@@ -63,45 +64,46 @@ def smooth_motion_data(motion_data: MotionData, window_size: int = 3) -> MotionD
         body_positions=motion_data.body_positions.copy(),
         body_rotations=motion_data.body_rotations.copy(),
         body_linear_velocities=motion_data.body_linear_velocities.copy(),
-        body_angular_velocities=motion_data.body_angular_velocities.copy()
+        body_angular_velocities=motion_data.body_angular_velocities.copy(),
     )
-    
+
     # Apply smoothing to positions and velocities
     for i in range(window_size, len(smoothed.dof_positions) - window_size):
         # Smooth joint positions
         smoothed.dof_positions[i] = np.mean(
-            motion_data.dof_positions[i-window_size:i+window_size+1], 
-            axis=0
+            motion_data.dof_positions[i - window_size : i + window_size + 1], axis=0
         )
         # Smooth joint velocities
         smoothed.dof_velocities[i] = np.mean(
-            motion_data.dof_velocities[i-window_size:i+window_size+1], 
-            axis=0
+            motion_data.dof_velocities[i - window_size : i + window_size + 1], axis=0
         )
         # Smooth body positions
         smoothed.body_positions[i] = np.mean(
-            motion_data.body_positions[i-window_size:i+window_size+1], 
-            axis=0
+            motion_data.body_positions[i - window_size : i + window_size + 1], axis=0
         )
         # Smooth body rotations (using quaternion averaging)
         smoothed.body_rotations[i] = np.mean(
-            motion_data.body_rotations[i-window_size:i+window_size+1], 
-            axis=0
+            motion_data.body_rotations[i - window_size : i + window_size + 1], axis=0
         )
         # Normalize quaternions
         smoothed.body_rotations[i] = smoothed.body_rotations[i] / np.linalg.norm(
-            smoothed.body_rotations[i], 
-            axis=-1, 
-            keepdims=True
+            smoothed.body_rotations[i], axis=-1, keepdims=True
         )
-    
+
     return smoothed
+
 
 class MotionRecorder:
     """Motion data recorder for robot movements"""
 
-    def __init__(self, robot, dof_names_to_record: List[str],
-                 fps: int = 60, device: str = "cuda", smoothing_window: int = 3):
+    def __init__(
+        self,
+        robot,
+        dof_names_to_record: List[str],
+        fps: int = 60,
+        device: str = "cuda",
+        smoothing_window: int = 3,
+    ):
         """
         Args:
             robot: Robot object for metadata
@@ -121,14 +123,18 @@ class MotionRecorder:
         self.body_names = np.asarray(robot.body_names, dtype=np.str_)
 
         try:
-            self.root_body_idx = list(robot.body_names).index('pelvis')
+            self.root_body_idx = list(robot.body_names).index("pelvis")
         except ValueError:
-            raise ValueError("The robot asset must have a body named 'pelvis' to be used with MotionRecorder.")
+            raise ValueError(
+                "The robot asset must have a body named 'pelvis' to be used with MotionRecorder."
+            )
 
         # Create a mapping from the robot's full joint list to the desired recording list
         robot_dof_map = {name: i for i, name in enumerate(robot.joint_names)}
-        self.dof_indices = np.array([robot_dof_map[name] for name in dof_names_to_record], dtype=np.int32)
-        
+        self.dof_indices = np.array(
+            [robot_dof_map[name] for name in dof_names_to_record], dtype=np.int32
+        )
+
         self.recorded_frames: list[dict] = []
         self.is_recording = False
 
@@ -152,8 +158,12 @@ class MotionRecorder:
         # --- Root ---
         root_pos = self.robot.data.body_pos_w[0, self.root_body_idx].cpu().numpy()
         root_rot = self.robot.data.body_quat_w[0, self.root_body_idx].cpu().numpy()
-        root_lin_vel = self.robot.data.body_lin_vel_w[0, self.root_body_idx].cpu().numpy()
-        root_ang_vel = self.robot.data.body_ang_vel_w[0, self.root_body_idx].cpu().numpy()
+        root_lin_vel = (
+            self.robot.data.body_lin_vel_w[0, self.root_body_idx].cpu().numpy()
+        )
+        root_ang_vel = (
+            self.robot.data.body_ang_vel_w[0, self.root_body_idx].cpu().numpy()
+        )
 
         # --- Full body ---
         body_pos = self.robot.data.body_pos_w[0].cpu().numpy()
@@ -213,11 +223,11 @@ class MotionRecorder:
             body_linear_velocities=body_lin,
             body_angular_velocities=body_ang,
         )
-        
+
         # Apply smoothing if window size > 1
         if self.smoothing_window > 1:
             motion_data = smooth_motion_data(motion_data, self.smoothing_window)
-            
+
         return motion_data
 
     def save_data(self, out_file: str, data: MotionData | None = None) -> bool:
@@ -251,25 +261,25 @@ class MotionRecorder:
 
 def load_motion_data(file_path: str) -> Optional[MotionData]:
     """Load motion data file
-    
+
     Args:
         file_path: Path to .npz file
-        
+
     Returns:
         MotionData object if successful, None otherwise
     """
     try:
         data = np.load(file_path)
         return MotionData(
-            fps=int(data['fps']),
-            dof_names=data['dof_names'],
-            body_names=data['body_names'],
-            dof_positions=data['dof_positions'],
-            dof_velocities=data['dof_velocities'],
-            body_positions=data['body_positions'],
-            body_rotations=data['body_rotations'],
-            body_linear_velocities=data['body_linear_velocities'],
-            body_angular_velocities=data['body_angular_velocities']
+            fps=int(data["fps"]),
+            dof_names=data["dof_names"],
+            body_names=data["body_names"],
+            dof_positions=data["dof_positions"],
+            dof_velocities=data["dof_velocities"],
+            body_positions=data["body_positions"],
+            body_rotations=data["body_rotations"],
+            body_linear_velocities=data["body_linear_velocities"],
+            body_angular_velocities=data["body_angular_velocities"],
         )
     except Exception as e:
         print(f"Error loading data file: {e}")

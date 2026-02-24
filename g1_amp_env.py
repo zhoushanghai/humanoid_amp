@@ -13,7 +13,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import quat_apply
+from isaaclab.utils.math import quat_apply, quat_rotate_inverse
 
 from .g1_amp_env_cfg import G1AmpEnvCfg
 from .motions import MotionLoader
@@ -31,35 +31,92 @@ class G1AmpEnv(DirectRLEnv):
         self.action_offset = 0.5 * (dof_upper_limits + dof_lower_limits)
         self.action_scale = dof_upper_limits - dof_lower_limits
 
-
         # load motion
-        self._motion_loader = MotionLoader(motion_file=self.cfg.motion_file, device=self.device)
+        self._motion_loader = MotionLoader(
+            motion_file=self.cfg.motion_file, device=self.device
+        )
 
-        # DOF and key body indexes  
-        key_body_names = [ "left_shoulder_pitch_link",
-            "right_shoulder_pitch_link",
-            "left_elbow_link",
-            "right_elbow_link",
-            "right_hip_yaw_link",
-            "left_hip_yaw_link",
+        # DOF and key body indexes
+        key_body_names = [
             "right_rubber_hand",
             "left_rubber_hand",
             "right_ankle_roll_link",
-            "left_ankle_roll_link"]
+            "left_ankle_roll_link",
+        ]
 
         self.ref_body_index = self.robot.data.body_names.index(self.cfg.reference_body)
-        self.key_body_indexes = [self.robot.data.body_names.index(name) for name in key_body_names]
+        self.key_body_indexes = [
+            self.robot.data.body_names.index(name) for name in key_body_names
+        ]
         # Used to for reset strategy
-        self.motion_dof_indexes = self._motion_loader.get_dof_index(self.robot.data.joint_names)
-        self.motion_ref_body_index = self._motion_loader.get_body_index([self.cfg.reference_body])[0]
-        self.motion_key_body_indexes = self._motion_loader.get_body_index(key_body_names)
-
-        # reconfigure AMP observation space according to the number of observations and create the buffer
-        self.amp_observation_size = self.cfg.num_amp_observations * self.cfg.amp_observation_space
-        self.amp_observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.amp_observation_size,))
-        self.amp_observation_buffer = torch.zeros(
-            (self.num_envs, self.cfg.num_amp_observations, self.cfg.amp_observation_space), device=self.device
+        self.motion_dof_indexes = self._motion_loader.get_dof_index(
+            self.robot.data.joint_names
         )
+        self.motion_ref_body_index = self._motion_loader.get_body_index(
+            [self.cfg.reference_body]
+        )[0]
+        self.motion_key_body_indexes = self._motion_loader.get_body_index(
+            key_body_names
+        )
+        self.amp_observation_size = (
+            self.cfg.num_amp_observations * self.cfg.amp_observation_space
+        )
+        self.amp_observation_space = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(self.amp_observation_size,)
+        )
+        self.amp_observation_buffer = torch.zeros(
+            (
+                self.num_envs,
+                self.cfg.num_amp_observations,
+                self.cfg.amp_observation_space,
+            ),
+            device=self.device,
+        )
+        self.command_target_speed = torch.zeros(
+            (self.num_envs, 2), device=self.device, dtype=torch.float32
+        )
+        self.command_time_left = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float32
+        )
+        self.motion_ids = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self.motion_start_times = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        # last actions buffer (always maintained)
+        self.last_actions = torch.zeros(
+            (self.num_envs, self.cfg.action_space), device=self.device
+        )
+
+        # actor observation history buffer (used when num_actor_observations > 1)
+        self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
+        if self.cfg.num_actor_observations > 1:
+            base_obs_size = (
+                self.cfg.amp_observation_space - self.key_body_obs_size
+            )  # 71
+            command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
+            # ablation 开关：历史帧包含哪些内容（默认 True 以兼容旧配置）
+            _inc_act = getattr(self.cfg, "history_include_last_actions", True)
+            _inc_cmd = getattr(self.cfg, "history_include_command", True)
+            self.actor_obs_hist_per_frame = base_obs_size  # A 始终包含
+            if _inc_act:
+                self.actor_obs_hist_per_frame += self.cfg.action_space
+            if _inc_cmd:
+                self.actor_obs_hist_per_frame += command_size
+            # buffer 只存储 (n-1) 个历史帧，当前帧单独处理
+            self.actor_obs_history_buffer = torch.zeros(
+                (
+                    self.num_envs,
+                    self.cfg.num_actor_observations - 1,
+                    self.actor_obs_hist_per_frame,
+                ),
+                device=self.device,
+            )
+            self._just_reset_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -86,13 +143,36 @@ class G1AmpEnv(DirectRLEnv):
         self.actions = actions.clone()
         # self.pre_actions = actions.clone()
 
+        # update command timers
+        self.command_time_left -= self.step_dt
+
+        # resample target velocity for environments where timer has expired
+        expired_envs = (self.command_time_left <= 0.0).nonzero(as_tuple=False).flatten()
+        if (
+            len(expired_envs) > 0
+            and self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]
+        ):
+            self.command_target_speed[expired_envs] = (
+                torch.rand((len(expired_envs), 2), device=self.device)
+                * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
+                + self.cfg.track_vel_range[0]
+            )
+            self.command_time_left[expired_envs] = (
+                torch.rand(len(expired_envs), device=self.device)
+                * (
+                    self.cfg.command_resampling_time_range[1]
+                    - self.cfg.command_resampling_time_range[0]
+                )
+                + self.cfg.command_resampling_time_range[0]
+            )
+
     def _apply_action(self):
-        # self.pre_actions = self.actions.clone()
         target = self.action_offset + self.action_scale * self.actions
         self.robot.set_joint_position_target(target)
+        # record the applied actions for use in the next observation step
+        self.last_actions = self.actions.clone()
 
     def _get_observations(self) -> dict:
-        # build task observation
         obs = compute_obs(
             self.robot.data.joint_pos,
             self.robot.data.joint_vel,
@@ -106,16 +186,91 @@ class G1AmpEnv(DirectRLEnv):
         # update AMP observation history
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
-        # build AMP observation
+        # build AMP observation (full obs including key_body_positions)
         self.amp_observation_buffer[:, 0] = obs.clone()
-        self.extras = {"amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)}
+        self.extras = {
+            "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
+        }
 
-        return {"policy": obs}
+        # remove key_body_positions (last key_body_obs_size dims) from base actor obs
+        base_actor_obs = obs[:, : -self.key_body_obs_size]
+
+        if self.cfg.num_actor_observations > 1:
+            _inc_act = getattr(self.cfg, "history_include_last_actions", True)
+            _inc_cmd = getattr(self.cfg, "history_include_command", True)
+
+            # 当前帧（始终完整： A + B + C）
+            current_parts = [base_actor_obs, self.last_actions]
+            if self.cfg.rew_track_vel > 0.0:
+                current_parts.append(self.command_target_speed)
+            current_frame = torch.cat(current_parts, dim=-1)
+
+            # 历史帧（由 ablation 开关决定）
+            hist_parts = [base_actor_obs]  # A 始终包含
+            if _inc_act:
+                hist_parts.append(self.last_actions)
+            if _inc_cmd and self.cfg.rew_track_vel > 0.0:
+                hist_parts.append(self.command_target_speed)
+            hist_frame = torch.cat(hist_parts, dim=-1)
+
+            # warm-start：刚重置的环境用当前历史帧填满所有历史槽
+            if self._just_reset_mask.any():
+                for i in range(self.cfg.num_actor_observations - 1):
+                    self.actor_obs_history_buffer[self._just_reset_mask, i] = (
+                        hist_frame[self._just_reset_mask]
+                    )
+                self._just_reset_mask[:] = False
+
+            # shift 历史 buffer 并写入最新历史帧
+            for i in reversed(range(self.cfg.num_actor_observations - 2)):
+                self.actor_obs_history_buffer[:, i + 1] = self.actor_obs_history_buffer[
+                    :, i
+                ]
+            self.actor_obs_history_buffer[:, 0] = hist_frame
+
+            # 最终 obs = 当前帧 | 历史帧（展平）
+            actor_obs = torch.cat(
+                [current_frame, self.actor_obs_history_buffer.view(self.num_envs, -1)],
+                dim=-1,
+            )
+        else:
+            # single-frame with last_actions
+            actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
+            if self.cfg.rew_track_vel > 0.0:
+                actor_obs = torch.cat([actor_obs, self.command_target_speed], dim=-1)
+
+        return {"policy": actor_obs}
 
     # def _get_rewards(self) -> torch.Tensor:
     #     return torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
     def _get_rewards(self) -> torch.Tensor:
-        total_reward, reward_log = compute_rewards(
+
+        # ================= speed tracking reward ==========================
+        if self.cfg.rew_track_vel > 0.0:
+            # calculate planar speed (2D: vx, vy) in local frame
+            current_speed_w = self.robot.data.body_lin_vel_w[:, self.ref_body_index]
+            current_quat_w = self.robot.data.body_quat_w[:, self.ref_body_index]
+            current_speed_b = quat_rotate_inverse(current_quat_w, current_speed_w)
+            current_speed = current_speed_b[:, :2]
+
+            # error is the norm of the difference vector
+            track_vel_error = torch.norm(
+                current_speed - self.command_target_speed, dim=-1
+            )
+            rew_track_vel = exp_reward_with_floor(
+                torch.square(track_vel_error),
+                self.cfg.rew_track_vel,
+                0.5,  # sigma for velocity tracking
+                floor=4.0,
+            )
+        else:
+            rew_track_vel = torch.zeros(
+                self.num_envs, dtype=torch.float, device=self.device
+            )
+
+        # ================= basic reward (call the original compute_rewards function) ==========================
+
+        basic_reward, basic_reward_log = compute_rewards(
             self.cfg.rew_termination,
             self.cfg.rew_action_l2,
             self.cfg.rew_joint_pos_limits,
@@ -126,15 +281,50 @@ class G1AmpEnv(DirectRLEnv):
             self.robot.data.joint_pos,
             self.robot.data.soft_joint_pos_limits,
             self.robot.data.joint_acc,
-            self.robot.data.joint_vel,    
+            self.robot.data.joint_vel,
         )
-        self.extras["log"] = reward_log
+
+        # ================= total reward ==========================
+        total_reward = basic_reward + rew_track_vel
+
+        # ============== log ================================
+        log_dict = {
+            "total_reward": total_reward.mean().item(),
+        }
+        if self.cfg.rew_track_vel > 0.0:
+            log_dict["rew_track_vel"] = rew_track_vel.mean().item()
+            log_dict["error_track_vel"] = track_vel_error.mean().item()
+
+        # add basic reward log
+        for key, value in basic_reward_log.items():
+            if isinstance(value, torch.Tensor):
+                log_dict[key] = value.mean().item()
+            else:
+                log_dict[key] = float(value)
+
+        self.extras["log"] = log_dict
+
+        # directly record to TensorBoard (if agent is available)
+        if (
+            hasattr(self, "_skrl_agent")
+            and getattr(self, "_skrl_agent", None) is not None
+        ):
+            try:
+                agent = getattr(self, "_skrl_agent")
+                for k, v in log_dict.items():
+                    agent.track_data(f"Reward / {k}", v)
+            except Exception:
+                pass
+
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         if self.cfg.early_termination:
-            died = self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height
+            died = (
+                self.robot.data.body_pos_w[:, self.ref_body_index, 2]
+                < self.cfg.termination_height
+            )
         else:
             died = torch.zeros_like(time_out)
         return died, time_out
@@ -149,7 +339,9 @@ class G1AmpEnv(DirectRLEnv):
             root_state, joint_pos, joint_vel = self._reset_strategy_default(env_ids)
         elif self.cfg.reset_strategy.startswith("random"):
             start = "start" in self.cfg.reset_strategy
-            root_state, joint_pos, joint_vel = self._reset_strategy_random(env_ids, start)
+            root_state, joint_pos, joint_vel = self._reset_strategy_random(
+                env_ids, start
+            )
         else:
             raise ValueError(f"Unknown reset strategy: {self.cfg.reset_strategy}")
 
@@ -157,9 +349,19 @@ class G1AmpEnv(DirectRLEnv):
         self.robot.write_root_com_velocity_to_sim(root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
+        # reset last_actions for the reset envs
+        self.last_actions[env_ids] = 0.0
+        if self.cfg.num_actor_observations > 1:
+            # do NOT zero the buffer here; instead mark these envs so
+            # _get_observations will warm-start the buffer with the real
+            # first observation on the next step.
+            self._just_reset_mask[env_ids] = True
+
     # reset strategies
 
-    def _reset_strategy_default(self, env_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _reset_strategy_default(
+        self, env_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         root_state = self.robot.data.default_root_state[env_ids].clone()
         root_state[:, :3] += self.scene.env_origins[env_ids]
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
@@ -171,7 +373,15 @@ class G1AmpEnv(DirectRLEnv):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # sample random motion times (or zeros if start is True)
         num_samples = env_ids.shape[0]
-        times = np.zeros(num_samples) if start else self._motion_loader.sample_times(num_samples)
+        motion_ids, times = self._motion_loader.sample_times(num_samples, start=start)
+
+        self.motion_ids[env_ids] = torch.tensor(
+            motion_ids, dtype=torch.long, device=self.device
+        )
+        self.motion_start_times[env_ids] = torch.tensor(
+            times, dtype=torch.float32, device=self.device
+        )
+
         # sample random motions
         (
             dof_positions,
@@ -180,13 +390,19 @@ class G1AmpEnv(DirectRLEnv):
             body_rotations,
             body_linear_velocities,
             body_angular_velocities,
-        ) = self._motion_loader.sample(num_samples=num_samples, times=times)
+        ) = self._motion_loader.sample(
+            num_samples=num_samples, times=times, motion_ids=motion_ids
+        )
 
         # get root transforms (the humanoid torso)
         motion_torso_index = self._motion_loader.get_body_index(["pelvis"])[0]
         root_state = self.robot.data.default_root_state[env_ids].clone()
-        root_state[:, 0:3] = body_positions[:, motion_torso_index] + self.scene.env_origins[env_ids]
-        root_state[:, 2] += 0.05  # lift the humanoid slightly to avoid collisions with the ground
+        root_state[:, 0:3] = (
+            body_positions[:, motion_torso_index] + self.scene.env_origins[env_ids]
+        )
+        root_state[
+            :, 2
+        ] += 0.05  # lift the humanoid slightly to avoid collisions with the ground
         root_state[:, 3:7] = body_rotations[:, motion_torso_index]
         root_state[:, 7:10] = body_linear_velocities[:, motion_torso_index]
         root_state[:, 10:13] = body_angular_velocities[:, motion_torso_index]
@@ -195,21 +411,56 @@ class G1AmpEnv(DirectRLEnv):
         dof_vel = dof_velocities[:, self.motion_dof_indexes]
 
         # update AMP observation
-        amp_observations = self.collect_reference_motions(num_samples, times)
-        self.amp_observation_buffer[env_ids] = amp_observations.view(num_samples, self.cfg.num_amp_observations, -1)
+        amp_observations = self.collect_reference_motions(
+            num_samples, times, motion_ids
+        )
+        self.amp_observation_buffer[env_ids] = amp_observations.view(
+            num_samples, self.cfg.num_amp_observations, -1
+        )
+
+        # sample random target speed (2D: vx, vy)
+        if self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]:
+            self.command_target_speed[env_ids] = (
+                torch.rand((len(env_ids), 2), device=self.device)
+                * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
+                + self.cfg.track_vel_range[0]
+            )
+            self.command_time_left[env_ids] = (
+                torch.rand(len(env_ids), device=self.device)
+                * (
+                    self.cfg.command_resampling_time_range[1]
+                    - self.cfg.command_resampling_time_range[0]
+                )
+                + self.cfg.command_resampling_time_range[0]
+            )
+        else:
+            self.command_target_speed[env_ids, 0] = self.cfg.track_vel_range[0]
+            self.command_target_speed[env_ids, 1] = 0.0
+            self.command_time_left[env_ids] = float("inf")
 
         return root_state, dof_pos, dof_vel
 
     # env methods
 
-    def collect_reference_motions(self, num_samples: int, current_times: np.ndarray | None = None) -> torch.Tensor:
+    def collect_reference_motions(
+        self,
+        num_samples: int,
+        current_times: np.ndarray | None = None,
+        motion_ids: np.ndarray | None = None,
+    ) -> torch.Tensor:
         # sample random motion times (or use the one specified)
         if current_times is None:
-            current_times = self._motion_loader.sample_times(num_samples)
+            motion_ids, current_times = self._motion_loader.sample_times(num_samples)
         times = (
             np.expand_dims(current_times, axis=-1)
             - self._motion_loader.dt * np.arange(0, self.cfg.num_amp_observations)
         ).flatten()
+
+        if motion_ids is not None:
+            motion_ids_expanded = np.repeat(motion_ids, self.cfg.num_amp_observations)
+        else:
+            motion_ids_expanded = np.zeros_like(times, dtype=np.int32)
+
         # get motions
         (
             dof_positions,
@@ -218,8 +469,11 @@ class G1AmpEnv(DirectRLEnv):
             body_rotations,
             body_linear_velocities,
             body_angular_velocities,
-        ) = self._motion_loader.sample(num_samples=num_samples, times=times)
+        ) = self._motion_loader.sample(
+            num_samples=num_samples, times=times, motion_ids=motion_ids_expanded
+        )
         # compute AMP observation
+
         amp_observation = compute_obs(
             dof_positions[:, self.motion_dof_indexes],
             dof_velocities[:, self.motion_dof_indexes],
@@ -244,6 +498,41 @@ def quaternion_to_tangent_and_normal(q: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
+def exp_reward_with_floor(
+    error: torch.Tensor, weight: float, sigma: float, floor: float = 3.0
+) -> torch.Tensor:
+    """
+    piecewise exponential reward function: large error region use linear, small error region use exponential
+
+    Args:
+        error: error value (already squared error)
+        weight: reward weight
+        sigma: standard deviation parameter of exponential function
+        floor: threshold, unit is sigma² multiple
+
+    Returns:
+        piecewise exponential reward value
+    """
+    sigma_sq = sigma * sigma
+    threshold = floor * sigma_sq
+
+    # exponential part at threshold and gradient
+    exp_val_at_threshold = weight * torch.exp(-floor)
+    linear_slope = (
+        weight / sigma_sq * torch.exp(-floor)
+    )  # ensure first-order continuous
+
+    # large error region: use linear penalty (keep negative slope)
+    linear_reward = exp_val_at_threshold - linear_slope * (error - threshold)
+
+    # small error region: use exponential reward
+    exp_reward = weight * torch.exp(-error / sigma_sq)
+
+    # choose the corresponding reward function based on the error size
+    return torch.where(error > threshold, linear_reward, exp_reward)
+
+
+@torch.jit.script
 def compute_obs(
     dof_positions: torch.Tensor,
     dof_velocities: torch.Tensor,
@@ -253,19 +542,25 @@ def compute_obs(
     root_angular_velocities: torch.Tensor,
     key_body_positions: torch.Tensor,
 ) -> torch.Tensor:
-    obs = torch.cat(
-        (
-            dof_positions,
-            dof_velocities,
-            root_positions[:, 2:3],  # root body height
-            quaternion_to_tangent_and_normal(root_rotations),
-            root_linear_velocities,
-            root_angular_velocities,
-            (key_body_positions - root_positions.unsqueeze(-2)).view(key_body_positions.shape[0], -1),
+    obs_list = [
+        dof_positions,
+        dof_velocities,
+        root_positions[:, 2:3],  # root body height
+        quaternion_to_tangent_and_normal(root_rotations),
+        root_linear_velocities,
+        root_angular_velocities,
+        (key_body_positions - root_positions.unsqueeze(-2)).view(
+            key_body_positions.shape[0], -1
         ),
+    ]
+
+    obs = torch.cat(
+        obs_list,
         dim=-1,
     )
     return obs
+
+
 @torch.jit.script
 def compute_rewards(
     rew_scale_termination: float,
@@ -282,20 +577,30 @@ def compute_rewards(
 ):
     rew_termination = rew_scale_termination * reset_terminated.float()
     rew_action_l2 = rew_scale_action_l2 * torch.sum(torch.square(actions), dim=1)
-    
-    out_of_limits = -(joint_pos - soft_joint_pos_limits[:,:,0]).clip(max=0.0)
-    out_of_limits += (joint_pos - soft_joint_pos_limits[:,:,1]).clip(min=0.0)
+
+    out_of_limits = -(joint_pos - soft_joint_pos_limits[:, :, 0]).clip(max=0.0)
+    out_of_limits += (joint_pos - soft_joint_pos_limits[:, :, 1]).clip(min=0.0)
     rew_joint_pos_limits = rew_scale_joint_pos_limits * torch.sum(out_of_limits, dim=1)
-    
-    rew_joint_acc_l2 = rew_scale_joint_acc_l2 * torch.sum(torch.square(joint_acc), dim=1)
-    rew_joint_vel_l2 = rew_scale_joint_vel_l2 * torch.sum(torch.square(joint_vel), dim=1)
-    total_reward = rew_termination + rew_action_l2 + rew_joint_pos_limits + rew_joint_acc_l2 + rew_joint_vel_l2
-    
+
+    rew_joint_acc_l2 = rew_scale_joint_acc_l2 * torch.sum(
+        torch.square(joint_acc), dim=1
+    )
+    rew_joint_vel_l2 = rew_scale_joint_vel_l2 * torch.sum(
+        torch.square(joint_vel), dim=1
+    )
+    total_reward = (
+        rew_termination
+        + rew_action_l2
+        + rew_joint_pos_limits
+        + rew_joint_acc_l2
+        + rew_joint_vel_l2
+    )
+
     log = {
-        "rew_termination": (rew_termination).mean(),
-        "rew_action_l2": (rew_action_l2).mean(),
-        "rew_joint_pos_limits": (rew_joint_pos_limits).mean(),
-        "rew_joint_acc_l2": (rew_joint_acc_l2).mean(),
-        "rew_joint_vel_l2": (rew_joint_vel_l2).mean(),
-        }
+        "pub_termination": (rew_termination).mean(),
+        "pub_action_l2": (rew_action_l2).mean(),
+        "pub_joint_pos_limits": (rew_joint_pos_limits).mean(),
+        "pub_joint_acc_l2": (rew_joint_acc_l2).mean(),
+        "pub_joint_vel_l2": (rew_joint_vel_l2).mean(),
+    }
     return total_reward, log
