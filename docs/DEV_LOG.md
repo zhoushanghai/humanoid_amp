@@ -185,9 +185,13 @@ python -m humanoid_amp.play \
 ## 核心修复总结 (Deep Explanation)
 为什么现在 204 维能训出来了？
 
-1. **历史帧预填充 (Warm-Start Fix)**: 
+1. **历史帧预填充 (Warm-Start Fix)**:
     - 之前在 Episode 重置时，历史 buffer 会被清零。高维度的零向量输入会导致 `RunningStandardScaler` 的均值和方差被瞬间拉低，造成观测归一化异常。
-    - 现在我们使用当前帧真实观测填充所有历史槽，消除了“零值污染”。
+    - 现在我们使用当前帧真实观测填充所有历史槽，消除了”零值污染”。
 2. **解锁探索噪声 (Exploration Fix)**:
     - 之前的配置 `fixed_log_std: True` 锁死了 Policy 的标准差。
     - 现在设置为 `False` 并调大了初始 `std`，允许策略在 204 维的高维状态空间中进行充分探索。
+
+## 2026-02-24 关键命令
+
+- **2026-02-24** `git commit`: feat(env): 修改 Policy 观测为 Sim2Real 友好版本 / modify policy obs for Sim2Real compatibility

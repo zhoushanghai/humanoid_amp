@@ -92,10 +92,11 @@ class G1AmpEnv(DirectRLEnv):
 
         # actor observation history buffer (used when num_actor_observations > 1)
         self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
+        # Policy base obs size: 64 (from compute_policy_obs) vs old 71 (amp_obs - key_body)
+        # Use config if available, otherwise default to 64
+        self.policy_base_obs_size = getattr(self.cfg, "policy_base_obs_size", 64)
         if self.cfg.num_actor_observations > 1:
-            base_obs_size = (
-                self.cfg.amp_observation_space - self.key_body_obs_size
-            )  # 71
+            base_obs_size = self.policy_base_obs_size  # 64 for new policy obs
             command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
             # ablation 开关：历史帧包含哪些内容（默认 True 以兼容旧配置）
             _inc_act = getattr(self.cfg, "history_include_last_actions", True)
@@ -173,7 +174,8 @@ class G1AmpEnv(DirectRLEnv):
         self.last_actions = self.actions.clone()
 
     def _get_observations(self) -> dict:
-        obs = compute_obs(
+        # Compute AMP observation (full 83-dim, for discriminator)
+        amp_obs = compute_amp_obs(
             self.robot.data.joint_pos,
             self.robot.data.joint_vel,
             self.robot.data.body_pos_w[:, self.ref_body_index],
@@ -187,13 +189,25 @@ class G1AmpEnv(DirectRLEnv):
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
         # build AMP observation (full obs including key_body_positions)
-        self.amp_observation_buffer[:, 0] = obs.clone()
+        self.amp_observation_buffer[:, 0] = amp_obs.clone()
         self.extras = {
             "amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)
         }
 
-        # remove key_body_positions (last key_body_obs_size dims) from base actor obs
-        base_actor_obs = obs[:, : -self.key_body_obs_size]
+        # Compute Policy observation (64-dim, Sim2Real friendly)
+        # gravity: (num_envs, 3) - broadcast to all envs
+        gravity = torch.tensor(
+            [0.0, 0.0, -9.81],
+            dtype=torch.float32,
+            device=self.device,
+        ).repeat(self.num_envs, 1)
+        base_actor_obs = compute_policy_obs(
+            self.robot.data.joint_pos,
+            self.robot.data.joint_vel,
+            self.robot.data.body_quat_w[:, self.ref_body_index],
+            self.robot.data.body_ang_vel_w[:, self.ref_body_index],
+            gravity,
+        )
 
         if self.cfg.num_actor_observations > 1:
             _inc_act = getattr(self.cfg, "history_include_last_actions", True)
@@ -474,7 +488,7 @@ class G1AmpEnv(DirectRLEnv):
         )
         # compute AMP observation
 
-        amp_observation = compute_obs(
+        amp_observation = compute_amp_obs(
             dof_positions[:, self.motion_dof_indexes],
             dof_velocities[:, self.motion_dof_indexes],
             body_positions[:, self.motion_ref_body_index],
@@ -533,7 +547,47 @@ def exp_reward_with_floor(
 
 
 @torch.jit.script
-def compute_obs(
+def quat_rotate_inverse_jit(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Quaternion inverse rotation (JIT-compatible version).
+
+    Rotates vector v by the inverse of quaternion q.
+    q: (N, 4) quaternion (w, x, y, z)
+    v: (N, 3) vector
+    """
+    # Conjugate of q (inverse for unit quaternion)
+    q_conj = torch.cat([q[..., :1], -q[..., 1:]], dim=-1)  # (N, 4)
+    # Use quat_apply from isaaclab (handles the rotation)
+    return quat_apply(q_conj, v)
+
+
+@torch.jit.script
+def compute_policy_obs(
+    dof_positions: torch.Tensor,
+    dof_velocities: torch.Tensor,
+    root_rotations: torch.Tensor,
+    root_angular_velocities: torch.Tensor,
+    gravity: torch.Tensor,
+) -> torch.Tensor:
+    """Compute policy observation (64-dim for Sim2Real compatibility).
+
+    Includes: dof_positions(29) + dof_velocities(29) + projected_gravity(3) + root_angular_velocities(3)
+    Excludes: root height, tangent/normal, root linear velocity, key_body positions
+    """
+    projected_gravity = quat_rotate_inverse_jit(root_rotations, gravity)
+    obs = torch.cat(
+        [
+            dof_positions,           # 29
+            dof_velocities,          # 29
+            projected_gravity,       # 3
+            root_angular_velocities, # 3
+        ],
+        dim=-1,
+    )
+    return obs  # 64-dim
+
+
+@torch.jit.script
+def compute_amp_obs(
     dof_positions: torch.Tensor,
     dof_velocities: torch.Tensor,
     root_positions: torch.Tensor,

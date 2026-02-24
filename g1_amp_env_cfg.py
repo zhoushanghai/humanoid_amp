@@ -162,7 +162,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 10.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
-    track_vel_range = (1.0, 1.0)
+    track_vel_range = (0.5, 1.5)
 
     # only velocity tracking reward, disable all penalties
     rew_termination = 0.0
@@ -172,8 +172,12 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     rew_joint_vel_l2 = 0.0
     rew_track_vel = 1.0
 
+    # Policy 基础观测维度（Sim2Real 版本：64 维，不再包含 key_body）
+    # 包含: dof_positions(29) + dof_velocities(29) + projected_gravity(3) + root_angular_vel(3)
+    policy_base_obs_size: int = 64
+
     # ✅ 只需修改这一个値来控制历史帧数，observation_space 会自动换算
-    num_actor_observations = 2
+    num_actor_observations = 5
 
     # ——— Ablation 开关：控制「历史帧」（非当前帧）包含哪些内容 ———
     # 当前帧始终包含完整内容： base_obs(A) + last_actions(B) + command(C)
@@ -184,12 +188,14 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     history_include_command: bool = True
 
     def __post_init__(self):
-        _KEY_BODY_OBS_SIZE = 4 * 3  # 12
-        base_obs_size = self.amp_observation_space - _KEY_BODY_OBS_SIZE  # 71
+        # 使用新的 policy_base_obs_size (64) 而不是旧的 amp_obs - key_body (71)
+        base_obs_size = self.policy_base_obs_size  # 64
         command_size = 2 if self.rew_track_vel > 0.0 else 0
 
         # 当前帧始终完整： A + B + C
-        current_frame_size = base_obs_size + self.action_space + command_size  # 102
+        current_frame_size = (
+            base_obs_size + self.action_space + command_size
+        )  # 64 + 29 + 2 = 95
 
         if self.num_actor_observations <= 1:
             self.observation_space = current_frame_size
@@ -201,6 +207,8 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
             if self.history_include_command:
                 hist_frame_size += command_size  # +C
             # 总维度 = 当前帧 + (n-1) × 历史帧
+            # 当前帧: 95, 历史帧: 95, num_actor_observations=5
+            # Total = 95 + 4 * 95 = 475
             self.observation_space = (
                 current_frame_size + (self.num_actor_observations - 1) * hist_frame_size
             )
