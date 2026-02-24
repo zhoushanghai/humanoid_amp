@@ -29,8 +29,8 @@
 
 ### 1. g1_amp_env.py - compute_obs 函数（约第536-561行）
 
-- [ ] 移除：root 高度 (1维)、tangent/normal (6维)、root_linear_velocities (3维)、key_body_positions (12维)
-- [ ] 新增：projected_gravity (3维) - 使用 `quat_rotate_inverse(root_rotations, gravity)`
+- [x] 移除：root 高度 (1维)、tangent/normal (6维)、root_linear_velocities (3维)、key_body_positions (12维)
+- [x] 新增：projected_gravity (3维) - 使用 `quat_rotate_inverse(root_rotations, gravity)`
 
 ### 2. g1_amp_env.py - _get_observations 方法（约第175-242行）
 
@@ -85,5 +85,39 @@ python -m humanoid_amp.play --task Isaac-G1-AMP-Deploy-Direct-v0 --checkpoint <p
 
 ## 后续实验（待规划）
 
-- [ ] 实验②：xxx
-- [ ] 实验③：xxx
+- [ ] 实验②：Walk + Run 混合训练，直线行走测试
+
+---
+
+### 实验②：Walk + Run 混合训练 + 直线行走验证
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-02-24 |
+| **目标** | 添加 run 参考数据，测试直线行走（侧向速度=0），速度范围 0.5-3.0 |
+| **状态** | ⏳ 待执行 |
+
+#### 改动内容
+
+1. **参考数据**：在 `motion_config.yaml` 中添加 run 动作
+2. **速度范围**：`track_vel_range = (0.5, 3.0)`
+3. **侧向速度**：已修复为 0（直线行走）
+
+#### 预期结果
+
+- 机器人能够直线行走（不再侧向跑）
+- 速度范围覆盖 0.5-3.0 m/s
+
+#### 验证命令
+
+```bash
+# 训练
+python -m humanoid_amp.train --task Isaac-G1-AMP-Deploy-Direct-v0 --headless
+
+# 推理（测试直线行走）
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --checkpoint <path> \
+  --num_envs 1 \
+  --video
+```

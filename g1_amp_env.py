@@ -153,11 +153,14 @@ class G1AmpEnv(DirectRLEnv):
             len(expired_envs) > 0
             and self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]
         ):
-            self.command_target_speed[expired_envs] = (
-                torch.rand((len(expired_envs), 2), device=self.device)
+            # Only sample forward velocity (vx), keep lateral velocity (vy) = 0 for straight walking
+            vx = (
+                torch.rand(len(expired_envs), device=self.device)
                 * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
                 + self.cfg.track_vel_range[0]
             )
+            self.command_target_speed[expired_envs, 0] = vx  # forward velocity
+            self.command_target_speed[expired_envs, 1] = 0.0  # lateral velocity = 0
             self.command_time_left[expired_envs] = (
                 torch.rand(len(expired_envs), device=self.device)
                 * (

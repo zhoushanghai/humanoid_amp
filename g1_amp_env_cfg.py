@@ -162,7 +162,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 10.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
-    track_vel_range = (0.5, 1.5)
+    track_vel_range = (0.5, 3.0)
 
     # only velocity tracking reward, disable all penalties
     rew_termination = 0.0

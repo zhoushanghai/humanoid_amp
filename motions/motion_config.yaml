@@ -23,9 +23,9 @@ motion_files:
   - /home/hz/datasets/g1_amp_nzp/walk4_subject1.npz
 
   # Run 数据
-  # - /home/hz/datasets/g1_amp_nzp/run1_subject2.npz
-  # - /home/hz/datasets/g1_amp_nzp/run1_subject5.npz
-  # - /home/hz/datasets/g1_amp_nzp/run2_subject1.npz
-  # - /home/hz/datasets/g1_amp_nzp/run2_subject4.npz
+  - /home/hz/datasets/g1_amp_nzp/run1_subject2.npz
+  - /home/hz/datasets/g1_amp_nzp/run1_subject5.npz
+  - /home/hz/datasets/g1_amp_nzp/run2_subject1.npz
+  - /home/hz/datasets/g1_amp_nzp/run2_subject4.npz
 
 
