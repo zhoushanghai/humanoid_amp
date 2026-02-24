@@ -72,10 +72,26 @@ class G1AmpEnv(DirectRLEnv):
             ),
             device=self.device,
         )
+        self.include_ang_vel_command = bool(
+            getattr(self.cfg, "include_ang_vel_command", False)
+        )
+        self.command_dim = 2 + (1 if self.include_ang_vel_command else 0)
+        self.command_lin_vel_x_range = tuple(
+            getattr(self.cfg, "command_lin_vel_x_range", self.cfg.track_vel_range)
+        )
+        self.command_lin_vel_y_range = tuple(
+            getattr(self.cfg, "command_lin_vel_y_range", (0.0, 0.0))
+        )
+        self.command_ang_vel_z_range = tuple(
+            getattr(self.cfg, "command_ang_vel_z_range", (0.0, 0.0))
+        )
         self.command_target_speed = torch.zeros(
-            (self.num_envs, 2), device=self.device, dtype=torch.float32
+            (self.num_envs, self.command_dim), device=self.device, dtype=torch.float32
         )
         self.command_time_left = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float32
+        )
+        self._episode_track_vel_sum = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float32
         )
         self.motion_ids = torch.zeros(
@@ -97,7 +113,7 @@ class G1AmpEnv(DirectRLEnv):
         self.policy_base_obs_size = getattr(self.cfg, "policy_base_obs_size", 64)
         if self.cfg.num_actor_observations > 1:
             base_obs_size = self.policy_base_obs_size  # 64 for new policy obs
-            command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
+            command_size = self.command_dim if self.cfg.rew_track_vel > 0.0 else 0
             # ablation 开关：历史帧包含哪些内容（默认 True 以兼容旧配置）
             _inc_act = getattr(self.cfg, "history_include_last_actions", True)
             _inc_cmd = getattr(self.cfg, "history_include_command", True)
@@ -149,18 +165,35 @@ class G1AmpEnv(DirectRLEnv):
 
         # resample target velocity for environments where timer has expired
         expired_envs = (self.command_time_left <= 0.0).nonzero(as_tuple=False).flatten()
-        if (
-            len(expired_envs) > 0
-            and self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]
-        ):
-            # Only sample forward velocity (vx), keep lateral velocity (vy) = 0 for straight walking
-            vx = (
-                torch.rand(len(expired_envs), device=self.device)
-                * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
-                + self.cfg.track_vel_range[0]
-            )
-            self.command_target_speed[expired_envs, 0] = vx  # forward velocity
-            self.command_target_speed[expired_envs, 1] = 0.0  # lateral velocity = 0
+        if len(expired_envs) > 0:
+            x_min, x_max = self.command_lin_vel_x_range
+            y_min, y_max = self.command_lin_vel_y_range
+            if x_max > x_min or y_max > y_min:
+                vx = (
+                    torch.rand(len(expired_envs), device=self.device) * (x_max - x_min)
+                    + x_min
+                )
+                vy = (
+                    torch.rand(len(expired_envs), device=self.device) * (y_max - y_min)
+                    + y_min
+                )
+                self.command_target_speed[expired_envs, 0] = vx
+                self.command_target_speed[expired_envs, 1] = vy
+                if self.include_ang_vel_command:
+                    z_min, z_max = self.command_ang_vel_z_range
+                    wz = (
+                        torch.rand(len(expired_envs), device=self.device)
+                        * (z_max - z_min)
+                        + z_min
+                    )
+                    self.command_target_speed[expired_envs, 2] = wz
+            else:
+                self.command_target_speed[expired_envs, 0] = x_min
+                self.command_target_speed[expired_envs, 1] = y_min
+                if self.include_ang_vel_command:
+                    self.command_target_speed[expired_envs, 2] = (
+                        self.command_ang_vel_z_range[0]
+                    )
             self.command_time_left[expired_envs] = (
                 torch.rand(len(expired_envs), device=self.device)
                 * (
@@ -269,11 +302,15 @@ class G1AmpEnv(DirectRLEnv):
             current_quat_w = self.robot.data.body_quat_w[:, self.ref_body_index]
             current_speed_b = quat_rotate_inverse(current_quat_w, current_speed_w)
             current_speed = current_speed_b[:, :2]
+            cmd = self.command_target_speed
 
-            # error is the norm of the difference vector
-            track_vel_error = torch.norm(
-                current_speed - self.command_target_speed, dim=-1
-            )
+            if self.include_ang_vel_command:
+                current_ang_vel_w = self.robot.data.body_ang_vel_w[:, self.ref_body_index]
+                current_ang_vel_b = quat_rotate_inverse(current_quat_w, current_ang_vel_w)
+                track_target = torch.cat([current_speed, current_ang_vel_b[:, 2:3]], dim=-1)
+                track_vel_error = torch.norm(track_target - cmd, dim=-1)
+            else:
+                track_vel_error = torch.norm(current_speed - cmd[:, :2], dim=-1)
             rew_track_vel = exp_reward_with_floor(
                 torch.square(track_vel_error),
                 self.cfg.rew_track_vel,
@@ -284,6 +321,7 @@ class G1AmpEnv(DirectRLEnv):
             rew_track_vel = torch.zeros(
                 self.num_envs, dtype=torch.float, device=self.device
             )
+        self._episode_track_vel_sum += rew_track_vel
 
         # ================= basic reward (call the original compute_rewards function) ==========================
 
@@ -311,6 +349,13 @@ class G1AmpEnv(DirectRLEnv):
         if self.cfg.rew_track_vel > 0.0:
             log_dict["rew_track_vel"] = rew_track_vel.mean().item()
             log_dict["error_track_vel"] = track_vel_error.mean().item()
+            log_dict["cmd_lin_vel_x_min"] = float(self.command_lin_vel_x_range[0])
+            log_dict["cmd_lin_vel_x_max"] = float(self.command_lin_vel_x_range[1])
+            log_dict["cmd_lin_vel_y_min"] = float(self.command_lin_vel_y_range[0])
+            log_dict["cmd_lin_vel_y_max"] = float(self.command_lin_vel_y_range[1])
+            if self.include_ang_vel_command:
+                log_dict["cmd_ang_vel_z_min"] = float(self.command_ang_vel_z_range[0])
+                log_dict["cmd_ang_vel_z_max"] = float(self.command_ang_vel_z_range[1])
 
         # add basic reward log
         for key, value in basic_reward_log.items():
@@ -349,8 +394,63 @@ class G1AmpEnv(DirectRLEnv):
     def _reset_idx(self, env_ids: torch.Tensor | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
+        pre_reset_episode_length = self.episode_length_buf[env_ids].clone()
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
+
+        if (
+            getattr(self.cfg, "enable_track_vel_curriculum", False)
+            and self.cfg.rew_track_vel > 0.0
+            and len(env_ids) > 0
+        ):
+            time_out_mask = pre_reset_episode_length >= self.max_episode_length - 1
+            timed_out_env_ids = env_ids[time_out_mask]
+            if len(timed_out_env_ids) > 0:
+                completed_steps = (pre_reset_episode_length[time_out_mask] + 1).to(
+                    dtype=torch.float32
+                )
+                avg_track_rew = torch.mean(
+                    self._episode_track_vel_sum[timed_out_env_ids] / completed_steps
+                )
+                threshold = (
+                    self.cfg.rew_track_vel
+                    * self.cfg.track_vel_curriculum_threshold_ratio
+                )
+                if avg_track_rew > threshold:
+                    delta = self.cfg.track_vel_curriculum_delta
+                    x_lim = getattr(
+                        self.cfg,
+                        "command_lin_vel_x_curriculum_limit_range",
+                        self.cfg.track_vel_curriculum_limit_range,
+                    )
+                    y_lim = getattr(
+                        self.cfg,
+                        "command_lin_vel_y_curriculum_limit_range",
+                        self.command_lin_vel_y_range,
+                    )
+                    z_lim = getattr(
+                        self.cfg,
+                        "command_ang_vel_z_curriculum_limit_range",
+                        self.command_ang_vel_z_range,
+                    )
+                    x_min, x_max = self.command_lin_vel_x_range
+                    y_min, y_max = self.command_lin_vel_y_range
+                    self.command_lin_vel_x_range = (
+                        max(x_min - delta, x_lim[0]),
+                        min(x_max + delta, x_lim[1]),
+                    )
+                    self.command_lin_vel_y_range = (
+                        max(y_min - delta, y_lim[0]),
+                        min(y_max + delta, y_lim[1]),
+                    )
+                    if self.include_ang_vel_command:
+                        z_min, z_max = self.command_ang_vel_z_range
+                        self.command_ang_vel_z_range = (
+                            max(z_min - delta, z_lim[0]),
+                            min(z_max + delta, z_lim[1]),
+                        )
+
+        self._episode_track_vel_sum[env_ids] = 0.0
 
         if self.cfg.reset_strategy == "default":
             root_state, joint_pos, joint_vel = self._reset_strategy_default(env_ids)
@@ -435,13 +535,20 @@ class G1AmpEnv(DirectRLEnv):
             num_samples, self.cfg.num_amp_observations, -1
         )
 
-        # sample random target speed (2D: vx, vy)
-        if self.cfg.track_vel_range[1] > self.cfg.track_vel_range[0]:
-            self.command_target_speed[env_ids] = (
-                torch.rand((len(env_ids), 2), device=self.device)
-                * (self.cfg.track_vel_range[1] - self.cfg.track_vel_range[0])
-                + self.cfg.track_vel_range[0]
-            )
+        # sample random target speed command
+        x_min, x_max = self.command_lin_vel_x_range
+        y_min, y_max = self.command_lin_vel_y_range
+        if x_max > x_min or y_max > y_min:
+            vx = torch.rand(len(env_ids), device=self.device) * (x_max - x_min) + x_min
+            vy = torch.rand(len(env_ids), device=self.device) * (y_max - y_min) + y_min
+            self.command_target_speed[env_ids, 0] = vx
+            self.command_target_speed[env_ids, 1] = vy
+            if self.include_ang_vel_command:
+                z_min, z_max = self.command_ang_vel_z_range
+                wz = (
+                    torch.rand(len(env_ids), device=self.device) * (z_max - z_min) + z_min
+                )
+                self.command_target_speed[env_ids, 2] = wz
             self.command_time_left[env_ids] = (
                 torch.rand(len(env_ids), device=self.device)
                 * (
@@ -451,8 +558,10 @@ class G1AmpEnv(DirectRLEnv):
                 + self.cfg.command_resampling_time_range[0]
             )
         else:
-            self.command_target_speed[env_ids, 0] = self.cfg.track_vel_range[0]
-            self.command_target_speed[env_ids, 1] = 0.0
+            self.command_target_speed[env_ids, 0] = x_min
+            self.command_target_speed[env_ids, 1] = y_min
+            if self.include_ang_vel_command:
+                self.command_target_speed[env_ids, 2] = self.command_ang_vel_z_range[0]
             self.command_time_left[env_ids] = float("inf")
 
         return root_state, dof_pos, dof_vel
