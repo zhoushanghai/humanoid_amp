@@ -70,8 +70,8 @@ python -m humanoid_amp.train \
 - [ ] S0 失败起点复现完成
 - ✅ ~~S1 完成（仅改 `fixed_log_std=False`）~~
 - ✅ ~~S2 完成（仅改 reset 初始化为 `warm-start`）~~
-- [ ] S3 完成（仅改历史帧为 `A+B`）
-- [ ] S4 完成（仅改历史帧为 `A`）
+- ✅ ~~S3 完成（仅改历史帧为 `A+B`）~~
+- ✅ ~~S4 完成（仅改历史帧为 `A`）~~
 - [ ] S5 回归复现完成
 - [ ] 输出 First Trainable Step 与 Minimal Trainable Conditions
 
@@ -91,7 +91,10 @@ python -m humanoid_amp.train \
 - 2026-02-25 23:15 - Start S2: switched reset history initialization from `zero` to `warm-start` only; keep S1 settings unchanged.
 - 2026-02-25 23:15 - Finish S2: result is `Not Trainable`. Checkpoint: `logs/skrl/g1_amp_dance/2026-02-25_23-08-39_ppo_torch/checkpoints/agent_10000.pt`.
 - 2026-02-25 23:15 - Start S3: changed history frame composition to `A+B` only (base_obs + last_actions).
+- 2026-02-25 23:25 - Finish S3: result is `Not Trainable`. Checkpoint: `待补充`.
+- 2026-02-25 23:25 - Start S4: changed history frame composition to `A` only (base_obs).
+- 2026-02-25 23:35 - Finish S4: result is `Not Trainable`. Checkpoint: `待补充`.
 
 ## Decision
 - Conclusion: 待填写。
-- Next Action: 执行 S3 训练并记录 checkpoint、Std 曲线与 Reward 趋势。
+- Next Action: 执行单帧 sanity check（`num_actor_observations=1`）确认训练链路本身是否可训，再决定 S5。

@@ -172,7 +172,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     rew_joint_vel_l2 = 0.0
     rew_track_vel = 1.0
 
-    # 2-frame history for policy input (S3)
-    # per-frame: 71 (base_obs) + 29 (last_actions) = 100; total: 100 * 2 = 200
+    # 2-frame history for policy input (S4)
+    # per-frame: 71 (base_obs) = 71; total: 71 * 2 = 142
     num_actor_observations = 2
-    observation_space = 200
+    observation_space = 142

@@ -93,9 +93,9 @@ class G1AmpEnv(DirectRLEnv):
         # actor observation history buffer (used when num_actor_observations > 1)
         self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
         if self.cfg.num_actor_observations > 1:
-            # per-frame: base_obs (no key_body_pos) + last_actions
+            # per-frame: base_obs only (S4)
             base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
-            self.actor_obs_per_frame = base_obs_size + self.cfg.action_space
+            self.actor_obs_per_frame = base_obs_size
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
@@ -186,8 +186,8 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs for S3: base + last_actions (A+B)
-            per_frame_actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
+            # build per-frame actor obs for S4: base only (A)
+            per_frame_actor_obs = base_actor_obs
 
             # warm-start history after reset to avoid zero-history shock
             if self._just_reset_mask.any():

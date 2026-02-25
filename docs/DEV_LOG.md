@@ -223,3 +223,56 @@ python -m humanoid_amp.train \
 ## 关键命令
 
 - **[2026-02-25]** `git commit`: feat(env,exp): 记录S2失败并切换S3条件 / log S2 fail and switch S3
+
+## Experiment Record
+
+- **Date**: 2026-02-25 23:25
+- **Model**: `待补充（S3 本轮 checkpoint 路径）`
+- **Phenomenon**: S3（仅改历史帧为 `A+B`）效果仍不行，依然训不出来。
+- **Conclusion/Notes**: `A+B` 历史帧仍未跨过可训阈值；继续执行 S4，改历史帧为 `A`（base_obs only）。
+
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Update (S4 Start)
+
+- **Date**: 2026-02-25 23:25
+- **Action**: 启动 S4 测试（仅改历史帧为 `A`）。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 历史帧构造由 `base_obs + last_actions` 改为 `base_obs`。
+    - `actor_obs_per_frame` 由 `71 + 29` 改为 `71`。
+  - **文件**: `g1_amp_env_cfg.py`
+    - `observation_space` 由 `200` 调整为 `142`（2 帧，每帧 71 维）。
+  - 其余条件保持 S3 不变：`fixed_log_std=False` + warm-start。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Record
+
+- **Date**: 2026-02-25 23:35
+- **Model**: `待补充（S4 本轮 checkpoint 路径）`
+- **Phenomenon**: S4（仅改历史帧为 `A`）仍然训不出来。
+- **Conclusion/Notes**: 目前 S1~S4 均未跨过可训阈值，下一步建议先做单帧 sanity check（`num_actor_observations=1`）验证训练链路基本可训性。
+
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## 关键命令
+
+- **[2026-02-25]** `git commit`: feat(env,exp): 记录S4失败并转单帧排查 / log S4 fail and n1 check
