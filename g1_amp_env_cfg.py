@@ -170,7 +170,7 @@ class G1AmpCustomEnvCfg(G1AmpEnvCfg_CUSTOM):
 
 @configclass
 class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
-    episode_length_s = 10.0
+    episode_length_s = 20.0
     motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
     reset_strategy = "random"
     # curriculum starts from easier command ranges
@@ -194,6 +194,8 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     # Policy 基础观测维度（Sim2Real 版本：64 维，不再包含 key_body）
     # 包含: dof_positions(29) + dof_velocities(29) + projected_gravity(3) + root_angular_vel(3)
     policy_base_obs_size: int = 64
+    # AMP discriminator observation history length
+    num_amp_observations = 32
 
     # ✅ 只需修改这一个値来控制历史帧数，observation_space 会自动换算
     num_actor_observations = 5

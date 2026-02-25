@@ -288,6 +288,11 @@ def main(
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+    # Attach agent handle for custom per-step TensorBoard logging in env.
+    try:
+        env.unwrapped._skrl_agent = runner.agent
+    except Exception:
+        pass
 
     # load checkpoint (if specified)
     if resume_path:

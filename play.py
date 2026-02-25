@@ -200,7 +200,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     experiment_cfg["trainer"]["close_environment_at_exit"] = False
     experiment_cfg["agent"]["experiment"]["write_interval"] = 0  # don't log to TensorBoard
     experiment_cfg["agent"]["experiment"]["checkpoint_interval"] = 0  # don't generate checkpoints
+    # AMP play-time memory guard:
+    # Runner initializes the AMP agent (including reference motion sampling).
+    # When amp history is large (e.g. 32 frames), default batch sizes can OOM during play startup.
+    if str(experiment_cfg.get("agent", {}).get("class", "")).upper() == "AMP":
+        experiment_cfg["agent"]["amp_batch_size"] = min(
+            int(experiment_cfg["agent"].get("amp_batch_size", 512)), 64
+        )
+        experiment_cfg["agent"]["discriminator_batch_size"] = min(
+            int(experiment_cfg["agent"].get("discriminator_batch_size", 4096)), 512
+        )
+        if "motion_dataset" in experiment_cfg:
+            experiment_cfg["motion_dataset"]["memory_size"] = min(
+                int(experiment_cfg["motion_dataset"].get("memory_size", 200000)), 20000
+            )
+        if "reply_buffer" in experiment_cfg:
+            experiment_cfg["reply_buffer"]["memory_size"] = min(
+                int(experiment_cfg["reply_buffer"].get("memory_size", 1000000)), 50000
+            )
     runner = Runner(env, experiment_cfg)
+    # Attach agent handle for env-side logging hooks (if enabled).
+    try:
+        env.unwrapped._skrl_agent = runner.agent
+    except Exception:
+        pass
 
     print(f"[INFO] Loading model checkpoint from: {resume_path}")
     runner.agent.load(resume_path)

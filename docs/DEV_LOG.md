@@ -197,3 +197,42 @@ python -m humanoid_amp.play \
 
 - **2026-02-24** `git commit`: feat(env): 修改 Policy 观测为 Sim2Real 友好版本 / modify policy obs for Sim2Real compatibility
 - **2026-02-24** `git commit`: fix(env): 修复侧向速度重采样导致斜走问题，添加 Walk+Run 混合训练 / fix lateral velocity sampling, add Walk+Run training
+
+## Bug Fix
+
+- **Date**: 2026-02-25
+- **Action**: 修复自定义速度范围日志未出现在 TensorBoard 的问题。
+- **Details**:
+    - **根因**: `g1_amp_env.py` 中 `agent.track_data(...)` 依赖环境对象上的 `_skrl_agent` 句柄，但 `train.py`/`play.py` 在创建 `Runner` 后未将 `runner.agent` 回挂到环境，导致 `Reward / cmd_lin_vel_*` 与 `Reward / cmd_ang_vel_z_*` 没有被写入。
+    - **修改文件**:
+        - `train.py`: 在 `runner = Runner(env, agent_cfg)` 后新增 `env.unwrapped._skrl_agent = runner.agent`（带容错）。
+        - `play.py`: 同步新增 `env.unwrapped._skrl_agent = runner.agent`（带容错）。
+    - **影响**:
+        - 训练时可在 TensorBoard 中看到以下标量：
+          `Reward / cmd_lin_vel_x_min`,
+          `Reward / cmd_lin_vel_x_max`,
+          `Reward / cmd_lin_vel_y_min`,
+          `Reward / cmd_lin_vel_y_max`,
+          `Reward / cmd_ang_vel_z_min`,
+          `Reward / cmd_ang_vel_z_max`。
+
+## 2026-02-25 关键命令
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+- **[2026-02-25]** `git commit`: fix(log): 修复课程日志写入分组 / fix curriculum logging groups
+
+## Bug Fix
+
+- **Date**: 2026-02-25
+- **Action**: 将速度课程范围指标从 Reward 面板拆分到独立面板。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 将 `cmd_*` 指标的 TensorBoard 前缀由 `Reward /` 改为 `Curriculum /`。
+    - 其他奖励相关指标保持在 `Reward /` 下不变。
+- **Effect**:
+    - 新面板: `Curriculum / cmd_lin_vel_x_min`, `Curriculum / cmd_lin_vel_x_max`, `Curriculum / cmd_lin_vel_y_min`, `Curriculum / cmd_lin_vel_y_max`, `Curriculum / cmd_ang_vel_z_min`, `Curriculum / cmd_ang_vel_z_max`。

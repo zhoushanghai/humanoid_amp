@@ -374,7 +374,10 @@ class G1AmpEnv(DirectRLEnv):
             try:
                 agent = getattr(self, "_skrl_agent")
                 for k, v in log_dict.items():
-                    agent.track_data(f"Reward / {k}", v)
+                    if k.startswith("cmd_"):
+                        agent.track_data(f"Curriculum / {k}", v)
+                    else:
+                        agent.track_data(f"Reward / {k}", v)
             except Exception:
                 pass
 
