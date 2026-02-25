@@ -95,4 +95,76 @@ python -m humanoid_amp.play \
 ## 关键命令
 
 - **[2026-02-23]** \`git commit\`: docs(docs): update DEV_LOG with training command and experiment results / 更新开发日志，新增训练命令及实验结果
+- **[2026-02-25]** `git commit`: feat(play,exp): 新增部署脚本并记录S1结果 / add deploy play script and log S1 result
 
+
+## Experiment Plan Update
+
+- **Date**: 2026-02-25 22:00
+- **Action**: 重构当前实验计划为“从不能训起点逐步加条件”的阶梯式设计。
+- **Details**:
+  - **文件**: `docs/@experiment_plan.md`
+  - 由原先并列消融（E1~E6）改为顺序加条件（S0~S5）。
+  - 明确失败起点 `S0`：`fixed_log_std=True` + 历史 `A+B+C` + reset 历史零初始化。
+  - 将已完成结果映射为 `S1`：仅改 `fixed_log_std=False`，已可训，checkpoint 为 `logs/skrl/g1_amp_dance/2026-02-25_20-54-01_ppo_torch/checkpoints/agent_85000.pt`。
+  - 新增目标输出：首个成功台阶与最小可训条件集（Minimal Trainable Conditions）。
+
+## Experiment Plan Correction
+
+- **Date**: 2026-02-25 22:10
+- **Action**: 修正阶梯实验文档状态，重置本轮 S1 为未完成。
+- **Details**:
+  - **文件**: `docs/@experiment_plan.md`
+  - 将 `S1` 从“已完成”改为“待验证”，`Checkpoint` 改为待补充。
+  - Checklist 中 `S1` 由已勾选恢复为未勾选。
+  - 明确说明：此前 `agent_85000.pt` 仅作为历史参考，不计入本轮 `S1` 完成判定。
+  - `Next Action` 更新为按顺序执行 `S0 -> S1`。
+
+## Experiment Plan Rewrite
+
+- **Date**: 2026-02-25 22:20
+- **Action**: 按“从不能训起点开始”的思路重写当前实验文档。
+- **Details**:
+  - **文件**: `docs/@experiment_plan.md`
+  - 重构为阶梯式单变量流程：`S0 -> S1 -> S2 -> S3 -> S4 -> S5`。
+  - 明确起点 `S0`（失败配置）与统一判定目标：`First Trainable Step`、`Minimal Trainable Conditions`。
+  - 清空本轮完成状态，所有步骤恢复未开始（从零开始）。
+  - 增加每步统一记录模板，保证实验可追踪与可复现。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Update (S1 Start)
+
+- **Date**: 2026-02-25 22:32
+- **Action**: 启动 S1 测试（仅改 `fixed_log_std=False`）。
+- **Details**:
+  - **文件**: `agents/skrl_g1_deploy_amp_cfg.yaml`
+  - 变更: `fixed_log_std: True -> False`。
+  - 其余条件保持当前 S0 代码路径不变（Deploy 当前为 2-frame `base+command`，reset 历史零初始化）。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Record
+
+- **Date**: 2026-02-25 23:05
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-25_22-34-04_ppo_torch/checkpoints/agent_45000.pt`
+- **Phenomenon**: S1（仅改 `fixed_log_std=False`，其余保持 S0）训练效果不行，完全训不出来。
+- **Conclusion/Notes**: 仅解锁 `std` 学习不足以跨过可训阈值；下一步执行 S2，仅切换 reset 历史初始化为 `warm-start` 做对照。
+
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
