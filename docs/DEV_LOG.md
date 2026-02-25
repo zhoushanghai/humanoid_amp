@@ -236,3 +236,33 @@ python -m humanoid_amp.train \
     - 其他奖励相关指标保持在 `Reward /` 下不变。
 - **Effect**:
     - 新面板: `Curriculum / cmd_lin_vel_x_min`, `Curriculum / cmd_lin_vel_x_max`, `Curriculum / cmd_lin_vel_y_min`, `Curriculum / cmd_lin_vel_y_max`, `Curriculum / cmd_ang_vel_z_min`, `Curriculum / cmd_ang_vel_z_max`。
+
+## Bug Fix
+
+- **Date**: 2026-02-25
+- **Action**: 新增课程触发判据可视化指标，便于定位“为什么没加难度”。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 新增 `Curriculum / curriculum_avg_track_rew`、`Curriculum / curriculum_threshold`、`Curriculum / curriculum_margin`、`Curriculum / curriculum_triggered`。
+    - 其中 `curriculum_triggered=1` 表示该次 reset 判定触发了难度升级，`0` 表示未触发。
+    - `cmd_*` 与 `curriculum_*` 统一放入 TensorBoard 的 `Curriculum /` 分组，和 `Reward /` 分开显示。
+
+## 2026-02-25 关键命令
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Bug Fix
+
+- **Date**: 2026-02-25
+- **Action**: 修复 `Curriculum / curriculum_threshold` 显示为 NaN 的问题。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 将课程统计默认值从 `NaN` 改为数值初始化：
+      `curriculum_avg_track_rew=0.0`，`curriculum_threshold=rew_track_vel * threshold_ratio`。
+    - 在每步日志中直接按配置实时计算并写入 `curriculum_threshold`，避免因未触发 timeout 判定而保持 NaN。
+    - `curriculum_margin` 改为使用实时阈值计算，确保曲线始终可读。
+- **[2026-02-25]** `git commit`: fix(env): 修复课程日志NaN / fix NaN curriculum logs

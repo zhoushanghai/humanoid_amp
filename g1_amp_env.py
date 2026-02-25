@@ -94,6 +94,11 @@ class G1AmpEnv(DirectRLEnv):
         self._episode_track_vel_sum = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float32
         )
+        self._curriculum_last_avg_track_rew = 0.0
+        self._curriculum_last_threshold = float(
+            self.cfg.rew_track_vel * self.cfg.track_vel_curriculum_threshold_ratio
+        )
+        self._curriculum_last_triggered = 0.0
         self.motion_ids = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
@@ -356,6 +361,21 @@ class G1AmpEnv(DirectRLEnv):
             if self.include_ang_vel_command:
                 log_dict["cmd_ang_vel_z_min"] = float(self.command_ang_vel_z_range[0])
                 log_dict["cmd_ang_vel_z_max"] = float(self.command_ang_vel_z_range[1])
+            if getattr(self.cfg, "enable_track_vel_curriculum", False):
+                current_threshold = float(
+                    self.cfg.rew_track_vel
+                    * self.cfg.track_vel_curriculum_threshold_ratio
+                )
+                log_dict["curriculum_avg_track_rew"] = float(
+                    self._curriculum_last_avg_track_rew
+                )
+                log_dict["curriculum_threshold"] = current_threshold
+                log_dict["curriculum_margin"] = float(
+                    self._curriculum_last_avg_track_rew - current_threshold
+                )
+                log_dict["curriculum_triggered"] = float(
+                    self._curriculum_last_triggered
+                )
 
         # add basic reward log
         for key, value in basic_reward_log.items():
@@ -374,7 +394,7 @@ class G1AmpEnv(DirectRLEnv):
             try:
                 agent = getattr(self, "_skrl_agent")
                 for k, v in log_dict.items():
-                    if k.startswith("cmd_"):
+                    if k.startswith("cmd_") or k.startswith("curriculum_"):
                         agent.track_data(f"Curriculum / {k}", v)
                     else:
                         agent.track_data(f"Reward / {k}", v)
@@ -406,6 +426,7 @@ class G1AmpEnv(DirectRLEnv):
             and self.cfg.rew_track_vel > 0.0
             and len(env_ids) > 0
         ):
+            self._curriculum_last_triggered = 0.0
             time_out_mask = pre_reset_episode_length >= self.max_episode_length - 1
             timed_out_env_ids = env_ids[time_out_mask]
             if len(timed_out_env_ids) > 0:
@@ -419,7 +440,10 @@ class G1AmpEnv(DirectRLEnv):
                     self.cfg.rew_track_vel
                     * self.cfg.track_vel_curriculum_threshold_ratio
                 )
+                self._curriculum_last_avg_track_rew = float(avg_track_rew.item())
+                self._curriculum_last_threshold = float(threshold)
                 if avg_track_rew > threshold:
+                    self._curriculum_last_triggered = 1.0
                     delta = self.cfg.track_vel_curriculum_delta
                     x_lim = getattr(
                         self.cfg,
