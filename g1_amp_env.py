@@ -93,10 +93,9 @@ class G1AmpEnv(DirectRLEnv):
         # actor observation history buffer (used when num_actor_observations > 1)
         self.key_body_obs_size = len(key_body_names) * 3  # 4 bodies * 3 dims = 12
         if self.cfg.num_actor_observations > 1:
-            # per-frame: base_obs (no key_body_pos) + command
+            # per-frame: base_obs (no key_body_pos) + last_actions
             base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
-            command_size = 2 if self.cfg.rew_track_vel > 0.0 else 0
-            self.actor_obs_per_frame = base_obs_size + command_size
+            self.actor_obs_per_frame = base_obs_size + self.cfg.action_space
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
@@ -104,6 +103,9 @@ class G1AmpEnv(DirectRLEnv):
                     self.actor_obs_per_frame,
                 ),
                 device=self.device,
+            )
+            self._just_reset_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
             )
 
     def _setup_scene(self):
@@ -184,11 +186,18 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs: base + command (no last_actions)
-            per_frame_parts = [base_actor_obs]
-            if self.cfg.rew_track_vel > 0.0:
-                per_frame_parts.append(self.command_target_speed)
-            per_frame_actor_obs = torch.cat(per_frame_parts, dim=-1)
+            # build per-frame actor obs for S3: base + last_actions (A+B)
+            per_frame_actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
+
+            # warm-start history after reset to avoid zero-history shock
+            if self._just_reset_mask.any():
+                num_hist_frames = self.cfg.num_actor_observations
+                self.actor_obs_history_buffer[self._just_reset_mask] = (
+                    per_frame_actor_obs[self._just_reset_mask]
+                    .unsqueeze(1)
+                    .repeat(1, num_hist_frames, 1)
+                )
+                self._just_reset_mask[:] = False
 
             # shift history and prepend current frame
             for i in reversed(range(self.cfg.num_actor_observations - 1)):
@@ -319,7 +328,7 @@ class G1AmpEnv(DirectRLEnv):
         # reset last_actions and actor obs history for the reset envs
         self.last_actions[env_ids] = 0.0
         if self.cfg.num_actor_observations > 1:
-            self.actor_obs_history_buffer[env_ids] = 0.0
+            self._just_reset_mask[env_ids] = True
 
     # reset strategies
 

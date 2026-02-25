@@ -69,7 +69,7 @@ python -m humanoid_amp.train \
 ## Checklist
 - [ ] S0 失败起点复现完成
 - ✅ ~~S1 完成（仅改 `fixed_log_std=False`）~~
-- [ ] S2 完成（仅改 reset 初始化为 `warm-start`）
+- ✅ ~~S2 完成（仅改 reset 初始化为 `warm-start`）~~
 - [ ] S3 完成（仅改历史帧为 `A+B`）
 - [ ] S4 完成（仅改历史帧为 `A`）
 - [ ] S5 回归复现完成
@@ -88,7 +88,10 @@ python -m humanoid_amp.train \
 - 2026-02-25 22:20 - Reorganized plan from scratch: start at untrainable S0 and add one condition per step.
 - 2026-02-25 22:32 - Start S1: changed only `fixed_log_std` to `False`; all other conditions remain same as current S0 code path.
 - 2026-02-25 23:05 - Finish S1: result is `Not Trainable`. Checkpoint: `logs/skrl/g1_amp_dance/2026-02-25_22-34-04_ppo_torch/checkpoints/agent_45000.pt`.
+- 2026-02-25 23:15 - Start S2: switched reset history initialization from `zero` to `warm-start` only; keep S1 settings unchanged.
+- 2026-02-25 23:15 - Finish S2: result is `Not Trainable`. Checkpoint: `logs/skrl/g1_amp_dance/2026-02-25_23-08-39_ppo_torch/checkpoints/agent_10000.pt`.
+- 2026-02-25 23:15 - Start S3: changed history frame composition to `A+B` only (base_obs + last_actions).
 
 ## Decision
 - Conclusion: 待填写。
-- Next Action: 执行 S2（仅切换 reset 历史初始化为 `warm-start`）并与 S1 对照。
+- Next Action: 执行 S3 训练并记录 checkpoint、Std 曲线与 Reward 趋势。

@@ -168,3 +168,58 @@ python -m humanoid_amp.train \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --headless
 ```
+
+## Experiment Update (S2 Start)
+
+- **Date**: 2026-02-25 23:15
+- **Action**: 启动 S2 测试（仅切换 reset 历史初始化为 warm-start）。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+  - 新增 `_just_reset_mask`：在 reset 时标记环境，不再直接清零历史 buffer。
+  - 在 `_get_observations` 中对刚 reset 的环境执行 warm-start：使用当前真实观测填满历史槽后再正常 shift。
+  - 保持 S1 条件不变：`agents/skrl_g1_deploy_amp_cfg.yaml` 中 `fixed_log_std=False`。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Record
+
+- **Date**: 2026-02-25 23:15
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-25_23-08-39_ppo_torch/checkpoints/agent_10000.pt`
+- **Phenomenon**: S2（仅切换 reset 历史初始化为 warm-start）效果仍不行，依然训不出来。
+- **Conclusion/Notes**: warm-start 不是当前可训阈值的关键突破条件；继续执行 S3，改历史帧为 `A+B`（base_obs + last_actions）。
+
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Update (S3 Start)
+
+- **Date**: 2026-02-25 23:15
+- **Action**: 启动 S3 测试（仅改历史帧为 `A+B`）。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 历史帧构造由 `base_obs + command` 改为 `base_obs + last_actions`。
+    - `actor_obs_per_frame` 由 `71 + 2` 改为 `71 + 29`。
+  - **文件**: `g1_amp_env_cfg.py`
+    - `observation_space` 由 `146` 调整为 `200`（2 帧，每帧 100 维）。
+  - 其余条件保持 S2 不变：`fixed_log_std=False` + warm-start。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## 关键命令
+
+- **[2026-02-25]** `git commit`: feat(env,exp): 记录S2失败并切换S3条件 / log S2 fail and switch S3
