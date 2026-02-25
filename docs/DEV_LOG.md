@@ -261,7 +261,7 @@ python -m humanoid_amp.train \
 ## Experiment Record
 
 - **Date**: 2026-02-25 23:35
-- **Model**: `待补充（S4 本轮 checkpoint 路径）`
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-25_23-23-50_ppo_torch/checkpoints/agent_10000.pt`
 - **Phenomenon**: S4（仅改历史帧为 `A`）仍然训不出来。
 - **Conclusion/Notes**: 目前 S1~S4 均未跨过可训阈值，下一步建议先做单帧 sanity check（`num_actor_observations=1`）验证训练链路基本可训性。
 
@@ -276,3 +276,53 @@ python -m humanoid_amp.train \
 ## 关键命令
 
 - **[2026-02-25]** `git commit`: feat(env,exp): 记录S4失败并转单帧排查 / log S4 fail and n1 check
+
+## Experiment Plan Update
+
+- **Date**: 2026-02-25 23:45
+- **Action**: 更新实验策略为“对齐可训基线 8055 并恢复关键逻辑验证”。
+- **Details**:
+  - **文件**: `docs/@experiment_plan.md`
+  - 新增实验项：`S5_recover_8055_logic`。
+  - 明确执行方式：对比并恢复 `g1_amp_env.py` + `g1_amp_env_cfg.py` 的 8055 观测构造逻辑（默认历史 `A+B+C`），保持 `fixed_log_std=False`。
+  - 停止继续盲目单变量消融，转为“差异消除 + 复验”路线。
+  - 更新 Next Action 为：先恢复 8055 逻辑，再训练验证。
+
+## Experiment Update (S5 Start)
+
+- **Date**: 2026-02-25 23:50
+- **Action**: 启动 S5_recover_8055_logic，对齐可训基线 `8055a88` 的观测逻辑。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 恢复为 `8055a88` 的观测构造：当前帧完整 `A+B+C`，历史帧按开关配置（默认 `A+B+C`）。
+    - 保留 reset warm-start 机制（`_just_reset_mask`）。
+  - **文件**: `g1_amp_env_cfg.py`
+    - 恢复 `history_include_last_actions=True`、`history_include_command=True`。
+    - 恢复 `__post_init__` 自动推导 `observation_space` 逻辑（默认完整历史为 204 维）。
+  - **保持不变**: `agents/skrl_g1_deploy_amp_cfg.yaml` 中 `fixed_log_std=False`。
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Experiment Record
+
+- **Date**: 2026-02-26 00:05
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-25_23-53-25_ppo_torch/checkpoints/agent_10000.pt`
+- **Phenomenon**: S5（恢复 `8055a88` 的 `g1_amp_env.py + g1_amp_env_cfg.py` 观测逻辑，保留 `fixed_log_std=False`）可以正常训出来。
+- **Conclusion/Notes**: 本轮首个可训步骤为 `S5_recover_8055_logic`。后续将从该可训版本出发，与当前实验链路做逐项差异回引，定位最小根因集合。
+
+- **Execution Record**:
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## 关键命令
+
+- **[2026-02-26]** `git commit`: feat(env,exp): 对齐8055观测并记录S5 / align 8055 obs and log S5

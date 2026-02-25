@@ -172,7 +172,35 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     rew_joint_vel_l2 = 0.0
     rew_track_vel = 1.0
 
-    # 2-frame history for policy input (S4)
-    # per-frame: 71 (base_obs) = 71; total: 71 * 2 = 142
+    # ✅ 只需修改这一个値来控制历史帧数，observation_space 会自动换算
     num_actor_observations = 2
-    observation_space = 142
+
+    # ——— Ablation 开关：控制「历史帧」（非当前帧）包含哪些内容 ———
+    # 当前帧始终包含完整内容： base_obs(A) + last_actions(B) + command(C)
+    # 实验②：两个均为 False（历史帧只含 A）
+    # 实验③： history_include_last_actions=True（历史帧含 A+B）
+    # 实验④：两个均为 True（历史帧完整 A+B+C）
+    history_include_last_actions: bool = True
+    history_include_command: bool = True
+
+    def __post_init__(self):
+        _KEY_BODY_OBS_SIZE = 4 * 3  # 12
+        base_obs_size = self.amp_observation_space - _KEY_BODY_OBS_SIZE  # 71
+        command_size = 2 if self.rew_track_vel > 0.0 else 0
+
+        # 当前帧始终完整： A + B + C
+        current_frame_size = base_obs_size + self.action_space + command_size  # 102
+
+        if self.num_actor_observations <= 1:
+            self.observation_space = current_frame_size
+        else:
+            # 历史帧大小由开关决定
+            hist_frame_size = base_obs_size  # A 始终包含
+            if self.history_include_last_actions:
+                hist_frame_size += self.action_space  # +B
+            if self.history_include_command:
+                hist_frame_size += command_size  # +C
+            # 总维度 = 当前帧 + (n-1) × 历史帧
+            self.observation_space = (
+                current_frame_size + (self.num_actor_observations - 1) * hist_frame_size
+            )

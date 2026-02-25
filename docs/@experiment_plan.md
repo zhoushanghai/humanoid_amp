@@ -42,15 +42,19 @@
   - Purpose: 验证最小历史信息是否足够。
   - Change: 在 S3 基础上仅改历史帧 `A+B -> A`。
 
-- S5:
-  - Purpose: 回归复现。
-  - Change: 使用当前最佳组合再跑一轮，确认稳定可复现。
+- S5_recover_8055_logic:
+  - Purpose: 以 `8055a88e5048565af93f6c96fc83f2e655d279cd` 为可训基线，恢复其观测逻辑并验证是否恢复可训。
+  - Change:
+    - 仅恢复 `g1_amp_env_cfg.py` 中 Deploy 的历史帧开关与自动维度推导（`history_include_last_actions/history_include_command/__post_init__`）。
+    - 仅恢复 `g1_amp_env.py` 的“当前帧完整 + (n-1) 历史帧”构造逻辑（默认历史 `A+B+C`）。
+    - 保持 `agents/skrl_g1_deploy_amp_cfg.yaml` 中 `fixed_log_std=False` 不变。
 
 ## How (执行顺序)
 1. 先跑 S0，确认“不能训”能被复现。
-2. 严格按 S1 -> S2 -> S3 -> S4 -> S5 顺序执行。
+2. 严格按 S1 -> S2 -> S3 -> S4 -> S5_recover_8055_logic 顺序执行。
 3. 每一步仅允许一个变量变化。
 4. 每步结束后立即记录 checkpoint 与结论。
+5. S5 额外输出“当前代码 vs 8055”的差异消除清单。
 
 ## Success Criteria
 - Must-have:
@@ -72,8 +76,8 @@ python -m humanoid_amp.train \
 - ✅ ~~S2 完成（仅改 reset 初始化为 `warm-start`）~~
 - ✅ ~~S3 完成（仅改历史帧为 `A+B`）~~
 - ✅ ~~S4 完成（仅改历史帧为 `A`）~~
-- [ ] S5 回归复现完成
-- [ ] 输出 First Trainable Step 与 Minimal Trainable Conditions
+- ✅ ~~S5_recover_8055_logic 完成（恢复 8055 观测逻辑并验证）~~
+- ✅ ~~输出 First Trainable Step 与 Minimal Trainable Conditions~~
 
 ## Step Record Template
 ### Sx
@@ -93,8 +97,11 @@ python -m humanoid_amp.train \
 - 2026-02-25 23:15 - Start S3: changed history frame composition to `A+B` only (base_obs + last_actions).
 - 2026-02-25 23:25 - Finish S3: result is `Not Trainable`. Checkpoint: `待补充`.
 - 2026-02-25 23:25 - Start S4: changed history frame composition to `A` only (base_obs).
-- 2026-02-25 23:35 - Finish S4: result is `Not Trainable`. Checkpoint: `待补充`.
+- 2026-02-25 23:35 - Finish S4: result is `Not Trainable`. Checkpoint: `logs/skrl/g1_amp_dance/2026-02-25_23-23-50_ppo_torch/checkpoints/agent_10000.pt`.
+- 2026-02-25 23:45 - Strategy update: stop further blind ablation; start S5_recover_8055_logic by diffing with commit `8055a88` and restoring its env/cfg observation logic.
+- 2026-02-25 23:50 - Start S5_recover_8055_logic: restored `g1_amp_env.py` and `g1_amp_env_cfg.py` to commit `8055a88` observation logic (default history `A+B+C`, auto observation_space).
+- 2026-02-26 00:05 - Finish S5_recover_8055_logic: result is `Trainable`. Checkpoint: `logs/skrl/g1_amp_dance/2026-02-25_23-53-25_ppo_torch/checkpoints/agent_10000.pt`.
 
 ## Decision
-- Conclusion: 待填写。
-- Next Action: 执行单帧 sanity check（`num_actor_observations=1`）确认训练链路本身是否可训，再决定 S5。
+- Conclusion: First Trainable Step = `S5_recover_8055_logic`；Minimal Trainable Conditions = 对齐 `8055a88` 的 `g1_amp_env.py + g1_amp_env_cfg.py` 观测逻辑（默认历史 `A+B+C`）+ `fixed_log_std=False`。
+- Next Action: 基于当前可训版本与 `8055a88` 做逐项差异回引（每次只引入一个差异）以定位真正根因。
