@@ -96,6 +96,7 @@ class G1AmpEnv(DirectRLEnv):
             # per-frame: base_obs only (S4)
             base_obs_size = self.cfg.amp_observation_space - self.key_body_obs_size
             self.actor_obs_per_frame = base_obs_size
+            # new path: history-only buffer (n-1), actor input = current + history
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
@@ -104,9 +105,19 @@ class G1AmpEnv(DirectRLEnv):
                 ),
                 device=self.device,
             )
+            # legacy path: full buffer (n), actor input = buffer.view(...)
+            self.actor_obs_history_buffer_legacy = torch.zeros(
+                (
+                    self.num_envs,
+                    self.cfg.num_actor_observations,
+                    self.actor_obs_per_frame,
+                ),
+                device=self.device,
+            )
             self._just_reset_mask = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
+            self._obs_compare_counter = 0
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -188,15 +199,21 @@ class G1AmpEnv(DirectRLEnv):
         if self.cfg.num_actor_observations > 1:
             # current frame: A, history frame: A (from previous steps)
             current_frame = base_actor_obs
-            per_frame_actor_obs = base_actor_obs
 
             # warm-start history after reset to avoid zero-history shock
             if self._just_reset_mask.any():
-                num_hist_frames = self.cfg.num_actor_observations - 1
-                self.actor_obs_history_buffer[self._just_reset_mask] = (
-                    per_frame_actor_obs[self._just_reset_mask]
+                reset_mask = self._just_reset_mask
+                num_hist_frames_new = self.cfg.num_actor_observations - 1
+                self.actor_obs_history_buffer[reset_mask] = (
+                    current_frame[reset_mask]
                     .unsqueeze(1)
-                    .repeat(1, num_hist_frames, 1)
+                    .repeat(1, num_hist_frames_new, 1)
+                )
+                num_hist_frames_legacy = self.cfg.num_actor_observations
+                self.actor_obs_history_buffer_legacy[reset_mask] = (
+                    current_frame[reset_mask]
+                    .unsqueeze(1)
+                    .repeat(1, num_hist_frames_legacy, 1)
                 )
                 self._just_reset_mask[:] = False
 
@@ -208,7 +225,28 @@ class G1AmpEnv(DirectRLEnv):
                 self.actor_obs_history_buffer[:, i + 1] = (
                     self.actor_obs_history_buffer[:, i]
                 )
-            self.actor_obs_history_buffer[:, 0] = per_frame_actor_obs
+            self.actor_obs_history_buffer[:, 0] = current_frame
+
+            # parallel legacy path for side-by-side comparison
+            for i in reversed(range(self.cfg.num_actor_observations - 1)):
+                self.actor_obs_history_buffer_legacy[:, i + 1] = (
+                    self.actor_obs_history_buffer_legacy[:, i]
+                )
+            self.actor_obs_history_buffer_legacy[:, 0] = current_frame
+            actor_obs_legacy = self.actor_obs_history_buffer_legacy.view(
+                self.num_envs, -1
+            )
+
+            self._obs_compare_counter += 1
+            if self._obs_compare_counter % 100 == 0:
+                diff = (actor_obs - actor_obs_legacy).abs()
+                print(
+                    f"[actor_obs_compare] step={self._obs_compare_counter} "
+                    f"new_shape={tuple(actor_obs.shape)} "
+                    f"legacy_shape={tuple(actor_obs_legacy.shape)} "
+                    f"max_abs_diff={diff.max().item():.6g} "
+                    f"mean_abs_diff={diff.mean().item():.6g}"
+                )
         else:
             # single-frame with last_actions
             actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)
@@ -217,7 +255,7 @@ class G1AmpEnv(DirectRLEnv):
                     [actor_obs, self.command_target_speed], dim=-1
                 )
 
-        return {"policy": actor_obs}
+        return {"policy": actor_obs_legacy}
 
     # def _get_rewards(self) -> torch.Tensor:
     #     return torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)

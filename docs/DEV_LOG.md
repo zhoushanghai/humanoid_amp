@@ -319,3 +319,18 @@ python -m humanoid_amp.train \
 ```bash
 # 本次为代码修改记录，无训练命令执行
 ```
+
+## Code Update
+
+- **Date**: 2026-02-26
+- **Action**: 新增 `actor_obs` 新旧逻辑并行结算，对比 `cat` 路径与 `view` 路径输出差异。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 新增 `actor_obs_history_buffer_legacy`（`[num_envs, num_actor_observations, obs_dim]`）并按旧逻辑并行更新。
+    - 保留当前新逻辑输出 `actor_obs = current_frame + history_flatten` 作为 policy 输入。
+    - 每 1000 步打印一次新旧对比统计：`new_shape`、`legacy_shape`、`max_abs_diff`、`mean_abs_diff`（不打印具体数值向量）。
+- **Execution Record**:
+
+```bash
+python -m py_compile g1_amp_env.py
+```
