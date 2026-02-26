@@ -89,6 +89,7 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     rew_joint_acc_l2 = -1.0e-06
     rew_joint_vel_l2 = -0.001
     rew_track_vel = 1.0
+    rew_track_ang_vel_z = 0.0
 
     # env
     episode_length_s = 10.0
@@ -176,9 +177,10 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     # curriculum starts from easier command ranges
     command_lin_vel_x_range = (0.5, 1.0)
     command_lin_vel_y_range = (0.0, 0.0)
-    command_ang_vel_z_range = (0.0, 0.0)
+    command_ang_vel_z_range = (-0.2, 0.2)
     include_ang_vel_command = True
     enable_track_vel_curriculum = True
+    track_vel_curriculum_threshold_ratio = 0.8
     command_lin_vel_x_curriculum_limit_range = (-1.0, 5.0)
     command_lin_vel_y_curriculum_limit_range = (-2.0, 2.0)
     command_ang_vel_z_curriculum_limit_range = (-1.0, 1.0)
@@ -190,6 +192,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     rew_joint_acc_l2 = 0.0
     rew_joint_vel_l2 = 0.0
     rew_track_vel = 1.0
+    rew_track_ang_vel_z = 1.0
 
     # Policy 基础观测维度（Sim2Real 版本：64 维，不再包含 key_body）
     # 包含: dof_positions(29) + dof_velocities(29) + projected_gravity(3) + root_angular_vel(3)
@@ -212,7 +215,7 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
         # 使用新的 policy_base_obs_size (64) 而不是旧的 amp_obs - key_body (71)
         base_obs_size = self.policy_base_obs_size  # 64
         command_size = 0
-        if self.rew_track_vel > 0.0:
+        if self.rew_track_vel > 0.0 or self.rew_track_ang_vel_z > 0.0:
             command_size = 2 + (1 if self.include_ang_vel_command else 0)
 
         # 当前帧始终完整： A + B + C

@@ -224,6 +224,32 @@ python -m humanoid_amp.train \
   --headless
 ```
 
+- **[2026-02-26]** `git commit`: feat(env): z轴课程独立触发 / split z-axis curriculum trigger
+
+## Bug Fix
+
+- **Date**: 2026-02-26
+- **Action**: 移除 Curriculum 面板中的冗余通用指标，仅保留分轴版本。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 删除通用兼容日志键：
+      `curriculum_avg_track_rew`、
+      `curriculum_margin`、
+      `curriculum_threshold`、
+      `curriculum_triggered`。
+    - 保留并继续记录分轴指标：
+      `curriculum_avg_track_rew_xy`、`curriculum_avg_track_rew_z`、
+      `curriculum_margin_xy`、`curriculum_margin_z`、
+      `curriculum_threshold_xy`、`curriculum_threshold_z`、
+      `curriculum_triggered_xy`、`curriculum_triggered_z`。
+    - 同步清理对应的冗余内部状态变量，避免死代码。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
 - **[2026-02-25]** `git commit`: fix(log): 修复课程日志写入分组 / fix curriculum logging groups
 
 ## Bug Fix
@@ -266,3 +292,60 @@ python -m humanoid_amp.train \
     - 在每步日志中直接按配置实时计算并写入 `curriculum_threshold`，避免因未触发 timeout 判定而保持 NaN。
     - `curriculum_margin` 改为使用实时阈值计算，确保曲线始终可读。
 - **[2026-02-25]** `git commit`: fix(env): 修复课程日志NaN / fix NaN curriculum logs
+
+## Feature Update
+
+- **Date**: 2026-02-26
+- **Action**: 为 Deploy 任务新增 z 轴旋转命令跟踪与独立旋转奖励，并沿用同一 curriculum 升难逻辑。
+- **Details**:
+    - **文件**: `g1_amp_env_cfg.py`
+    - 新增奖励权重配置 `rew_track_ang_vel_z`（默认 0.0）。
+    - `G1AmpDeployEnvCfg` 中启用旋转命令范围：`command_ang_vel_z_range = (-0.2, 0.2)`。
+    - `G1AmpDeployEnvCfg` 中显式设置课程阈值比例：`track_vel_curriculum_threshold_ratio = 0.8`。
+    - `G1AmpDeployEnvCfg` 中设置旋转跟踪奖励权重：`rew_track_ang_vel_z = 1.0`。
+    - **文件**: `g1_amp_env.py`
+    - 将命令跟踪奖励拆分为两项：
+      `rew_track_vel`（线速度 vx, vy）与 `rew_track_ang_vel_z`（角速度 wz）。
+    - 总跟踪奖励改为 `rew_track_cmd_total = rew_track_vel + rew_track_ang_vel_z`，并用于总奖励与 curriculum 判据统计。
+    - curriculum 阈值改为 `(rew_track_vel + rew_track_ang_vel_z) * track_vel_curriculum_threshold_ratio`。
+    - 速度命令重采样逻辑增加 z 轴范围判定：即使 x/y 固定，也可单独采样 z 轴旋转命令。
+    - 新增 TensorBoard 指标：
+      `Reward / rew_track_ang_vel_z`、`Reward / error_track_ang_vel_z`。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --checkpoint logs/skrl/<run>/checkpoints/agent_<step>.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 300
+```
+
+## Bug Fix
+
+- **Date**: 2026-02-26
+- **Action**: 将 curriculum 触发逻辑改为 xy 与 z 轴独立判定、独立扩难度。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 将课程统计从单一总和拆分为：
+      `_episode_track_vel_sum`（xy）与 `_episode_track_ang_vel_z_sum`（z）。
+    - 触发逻辑改为双通道：
+      - `xy` 达标（`avg_track_rew_xy > rew_track_vel * 0.8`）仅扩展 `command_lin_vel_x/y_range`。
+      - `z` 达标（`avg_track_rew_z > rew_track_ang_vel_z * 0.8`）仅扩展 `command_ang_vel_z_range`。
+    - 保留总开关 `curriculum_triggered`（任一通道触发即为 1），并新增独立日志：
+      `curriculum_triggered_xy`、`curriculum_triggered_z`、
+      `curriculum_threshold_xy`、`curriculum_threshold_z`、
+      `curriculum_avg_track_rew_xy`、`curriculum_avg_track_rew_z`。
+    - 为兼容旧面板，`curriculum_threshold` / `curriculum_avg_track_rew` / `curriculum_margin` 现在默认对齐 `xy` 通道，不再使用 xy+z 合并阈值。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
