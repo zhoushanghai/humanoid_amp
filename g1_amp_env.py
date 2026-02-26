@@ -99,7 +99,7 @@ class G1AmpEnv(DirectRLEnv):
             self.actor_obs_history_buffer = torch.zeros(
                 (
                     self.num_envs,
-                    self.cfg.num_actor_observations,
+                    self.cfg.num_actor_observations - 1,
                     self.actor_obs_per_frame,
                 ),
                 device=self.device,
@@ -186,12 +186,13 @@ class G1AmpEnv(DirectRLEnv):
         base_actor_obs = obs[:, : -self.key_body_obs_size]
 
         if self.cfg.num_actor_observations > 1:
-            # build per-frame actor obs for S4: base only (A)
+            # current frame: A, history frame: A (from previous steps)
+            current_frame = base_actor_obs
             per_frame_actor_obs = base_actor_obs
 
             # warm-start history after reset to avoid zero-history shock
             if self._just_reset_mask.any():
-                num_hist_frames = self.cfg.num_actor_observations
+                num_hist_frames = self.cfg.num_actor_observations - 1
                 self.actor_obs_history_buffer[self._just_reset_mask] = (
                     per_frame_actor_obs[self._just_reset_mask]
                     .unsqueeze(1)
@@ -199,14 +200,15 @@ class G1AmpEnv(DirectRLEnv):
                 )
                 self._just_reset_mask[:] = False
 
-            # shift history and prepend current frame
-            for i in reversed(range(self.cfg.num_actor_observations - 1)):
+            # use old history for current policy input, then update history with current frame
+            history_flatten = self.actor_obs_history_buffer.view(self.num_envs, -1).clone()
+            actor_obs = torch.cat([current_frame, history_flatten], dim=-1)
+
+            for i in reversed(range(self.cfg.num_actor_observations - 2)):
                 self.actor_obs_history_buffer[:, i + 1] = (
                     self.actor_obs_history_buffer[:, i]
                 )
             self.actor_obs_history_buffer[:, 0] = per_frame_actor_obs
-
-            actor_obs = self.actor_obs_history_buffer.view(self.num_envs, -1)
         else:
             # single-frame with last_actions
             actor_obs = torch.cat([base_actor_obs, self.last_actions], dim=-1)

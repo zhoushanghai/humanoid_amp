@@ -276,3 +276,46 @@ python -m humanoid_amp.train \
 ## 关键命令
 
 - **[2026-02-25]** `git commit`: feat(env,exp): 记录S4失败并转单帧排查 / log S4 fail and n1 check
+
+## Code Update
+
+- **Date**: 2026-02-26
+- **Action**: 调整多帧 actor 观测拼接：当前帧加入 `last_actions` 和 `command`，历史帧保持 `base_obs`。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 多帧路径改为：`actor_obs = current_frame(A+B+C) + history(A)`。
+    - 历史 buffer 由 `n` 帧改为 `(n-1)` 帧，仅存历史帧。
+  - **文件**: `g1_amp_env_cfg.py`
+    - `G1AmpDeployEnvCfg.observation_space` 由 `142` 更新为 `173`（`num_actor_observations=2`）。
+- **Execution Record**:
+
+```bash
+# 本次为代码修改记录，无训练命令执行
+```
+
+## Experiment Record
+
+- **Date**: 2026-02-26
+- **Model**: `N/A（本次为代码定位与修复记录，未启动新训练）`
+- **Phenomenon**: Deploy 多帧路径在 S4 代码中仅使用 `base_obs`，未把当前帧 `last_actions` 与 `command` 送入 policy，导致训练输入关键信息缺失。
+- **Conclusion/Notes**: 本轮定位结论为“多帧路径缺少当前帧 `last_actions/command` 是训不出来的关键原因”。已修复为 `current_frame(A+B+C) + history(A)`；后续可做对照实验拆分验证 `last_actions` 与 `command` 的单独贡献。
+
+## 关键命令
+
+- **[2026-02-26]** `git commit`: fix(env): 修复多帧当前帧输入缺失 / restore current-frame inputs
+
+## Code Update
+
+- **Date**: 2026-02-26
+- **Action**: 修复多帧输入“当前帧重复”问题，确保 policy 读取到真实历史帧（上一时刻及更早）。
+- **Details**:
+  - **文件**: `g1_amp_env.py`
+    - 调整多帧时序：先读取 `actor_obs_history_buffer` 作为 `history_flatten` 拼接到 `actor_obs`，再将当前 `base_obs` 写回 history buffer。
+    - 修复后 `num_actor_observations=2` 时输入为 `[当前A, 上一帧A]`，不再是 `[当前A, 当前A]`。
+  - **文件**: `g1_amp_env_cfg.py`
+    - 同步修正 `G1AmpDeployEnvCfg` 中多帧观测注释，避免与当前实现不一致。
+- **Execution Record**:
+
+```bash
+# 本次为代码修改记录，无训练命令执行
+```
