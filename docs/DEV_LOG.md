@@ -224,6 +224,8 @@ python -m humanoid_amp.train \
   --headless
 ```
 
+- **[2026-02-26]** `git commit`: feat(env): 接入地形课程学习 / add terrain curriculum
+
 - **[2026-02-26]** `git commit`: feat(env): z轴课程独立触发 / split z-axis curriculum trigger
 
 ## Bug Fix
@@ -258,10 +260,55 @@ python -m humanoid_amp.train \
 - **Action**: 将速度课程范围指标从 Reward 面板拆分到独立面板。
 - **Details**:
     - **文件**: `g1_amp_env.py`
-    - 将 `cmd_*` 指标的 TensorBoard 前缀由 `Reward /` 改为 `Curriculum /`。
-    - 其他奖励相关指标保持在 `Reward /` 下不变。
-- **Effect**:
-    - 新面板: `Curriculum / cmd_lin_vel_x_min`, `Curriculum / cmd_lin_vel_x_max`, `Curriculum / cmd_lin_vel_y_min`, `Curriculum / cmd_lin_vel_y_max`, `Curriculum / cmd_ang_vel_z_min`, `Curriculum / cmd_ang_vel_z_max`。
+
+## Feature Adaptation
+
+- **Date**: 2026-02-26 21:33:32 CST
+- **Action**: 为 `Isaac-G1-AMP-Deploy-Direct-v0` 适配 Direct workflow 的 terrain curriculum，并将指标记录到 TensorBoard。
+- **Details**:
+    - **文件**: `g1_amp_env_cfg.py`
+        - 新增 `terrain` 配置（`TerrainImporterCfg`）到 `G1AmpEnvCfg` 与 `G1AmpEnvCfg_CUSTOM`。
+        - 新增 terrain curriculum 参数：
+          `enable_terrain_curriculum`、
+          `terrain_curriculum_threshold_ratio`、
+          `terrain_curriculum_move_down_on_fall`。
+        - `G1AmpDeployEnvCfg` 启用 terrain curriculum，并切换为 `terrain_type="generator"`（`ROUGH_TERRAINS_CFG`），设置 `max_init_terrain_level=1`。
+        - 将 Deploy 的 `motion_file` 从绝对路径改为 `os.path.join(MOTIONS_DIR, "motion_config.yaml")`，提升可迁移性。
+    - **文件**: `g1_amp_env.py`
+        - `_setup_scene` 改为通过 `self.cfg.terrain.class_type(self.cfg.terrain)` 创建 terrain importer，不再固定 spawn ground plane。
+        - reset 原点统一改用 `self._terrain.env_origins`。
+        - 在 `_reset_idx` 新增 `_update_terrain_curriculum(...)` 调用：
+          - timeout 且速度跟踪平均奖励超过阈值时 `move_up`；
+          - 非 timeout（跌倒/提前终止）时按配置 `move_down`；
+          - 通过 `self._terrain.update_env_origins(...)` 更新 terrain levels 与 env origins。
+        - 新增 terrain 相关日志键并写入 `extras["log"]` 与 `agent.track_data(...)`：
+          `terrain_level_mean/min/max`、
+          `terrain_curriculum_avg_track_rew_xy`、
+          `terrain_curriculum_threshold_xy`、
+          `terrain_curriculum_move_up_count`、
+          `terrain_curriculum_move_down_count`、
+          `terrain_curriculum_timeout_ratio`。
+
+## Execution Record
+
+```bash
+python -m py_compile \
+  g1_amp_env.py \
+  g1_amp_env_cfg.py
+
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## Error Handling
+
+- `ImportError: attempted relative import with no known parent package`
+  - 场景：直接执行 `python - <<...` 导入 `g1_amp_env_cfg.py`。
+  - 处理：改为包上下文导入（`from humanoid_amp...`）或使用模块方式运行。
+- `ModuleNotFoundError: No module named 'gymnasium'`
+  - 场景：当前终端 Python 环境缺少训练依赖，无法在本机直接做运行时实例化验证。
+  - 处理：已完成语法级校验；运行级验证需在项目训练环境中执行上述 train 命令。
 
 ## Bug Fix
 

@@ -10,9 +10,12 @@ from dataclasses import MISSING
 from .g1_cfg import G1_CFG
 
 
+import isaaclab.sim as sim_utils
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import PhysxCfg, SimulationCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
 from isaaclab.assets import ArticulationCfg
 
@@ -74,6 +77,21 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
         num_envs=4096, env_spacing=4.0, replicate_physics=True
     )
 
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
+
     # robot
     robot: ArticulationCfg = G1_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -111,6 +129,10 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     command_lin_vel_x_curriculum_limit_range = (-1.0, 1.0)
     command_lin_vel_y_curriculum_limit_range = (0.0, 0.0)
     command_ang_vel_z_curriculum_limit_range = (0.0, 0.0)
+    # terrain curriculum, applied in DirectRLEnv implementation
+    enable_terrain_curriculum = False
+    terrain_curriculum_threshold_ratio = 0.8
+    terrain_curriculum_move_down_on_fall = True
 
     # spaces
     # default single-frame actor obs (legacy): 71 (base) + 29 (last_actions) + 2 (cmd) = 102
@@ -149,6 +171,21 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
         num_envs=4096, env_spacing=4.0, replicate_physics=True
     )
 
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
+
     # robot
     robot: ArticulationCfg = G1_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -172,7 +209,7 @@ class G1AmpCustomEnvCfg(G1AmpEnvCfg_CUSTOM):
 @configclass
 class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     episode_length_s = 20.0
-    motion_file = "/home/hz/g1/humanoid_amp/motions/motion_config.yaml"
+    motion_file = os.path.join(MOTIONS_DIR, "motion_config.yaml")
     reset_strategy = "random"
     # curriculum starts from easier command ranges
     command_lin_vel_x_range = (0.5, 1.0)
@@ -184,6 +221,25 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     command_lin_vel_x_curriculum_limit_range = (-1.0, 5.0)
     command_lin_vel_y_curriculum_limit_range = (-2.0, 2.0)
     command_ang_vel_z_curriculum_limit_range = (-1.0, 1.0)
+    enable_terrain_curriculum = True
+    terrain_curriculum_threshold_ratio = 0.8
+    terrain_curriculum_move_down_on_fall = True
+
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",
+        terrain_generator=ROUGH_TERRAINS_CFG,
+        max_init_terrain_level=1,
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
 
     # only velocity tracking reward, disable all penalties
     rew_termination = 0.0

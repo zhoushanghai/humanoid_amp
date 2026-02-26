@@ -12,7 +12,6 @@ import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import quat_apply, quat_rotate_inverse
 
 from .g1_amp_env_cfg import G1AmpEnvCfg
@@ -111,6 +110,14 @@ class G1AmpEnv(DirectRLEnv):
         )
         self._curriculum_last_triggered_xy = 0.0
         self._curriculum_last_triggered_z = 0.0
+        self._terrain_curriculum_last_avg_track_rew_xy = 0.0
+        self._terrain_curriculum_last_threshold_xy = 0.0
+        self._terrain_curriculum_last_move_up_count = 0.0
+        self._terrain_curriculum_last_move_down_count = 0.0
+        self._terrain_curriculum_last_timeout_ratio = 0.0
+        self._terrain_curriculum_last_level_mean = 0.0
+        self._terrain_curriculum_last_level_min = 0.0
+        self._terrain_curriculum_last_level_max = 0.0
         self.motion_ids = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
@@ -152,21 +159,30 @@ class G1AmpEnv(DirectRLEnv):
                 self.num_envs, dtype=torch.bool, device=self.device
             )
 
+        self.enable_terrain_curriculum = bool(
+            getattr(self.cfg, "enable_terrain_curriculum", False)
+            and getattr(self.cfg.terrain, "terrain_type", "plane") == "generator"
+            and hasattr(self._terrain, "terrain_levels")
+        )
+        if hasattr(self._terrain, "terrain_levels"):
+            terrain_levels = self._terrain.terrain_levels.to(dtype=torch.float32)
+            self._terrain_curriculum_last_level_mean = float(terrain_levels.mean().item())
+            self._terrain_curriculum_last_level_min = float(
+                self._terrain.terrain_levels.min().item()
+            )
+            self._terrain_curriculum_last_level_max = float(
+                self._terrain.terrain_levels.max().item()
+            )
+
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
-        # add ground plane
-        spawn_ground_plane(
-            prim_path="/World/ground",
-            cfg=GroundPlaneCfg(
-                physics_material=sim_utils.RigidBodyMaterialCfg(
-                    static_friction=1.0,
-                    dynamic_friction=1.0,
-                    restitution=0.0,
-                ),
-            ),
-        )
+        self.cfg.terrain.num_envs = self.scene.cfg.num_envs
+        self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
+        self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
+        if self.device == "cpu":
+            self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
         # add lights
@@ -418,6 +434,28 @@ class G1AmpEnv(DirectRLEnv):
                 log_dict["curriculum_triggered_z"] = float(
                     self._curriculum_last_triggered_z
                 )
+            if self.enable_terrain_curriculum and hasattr(self._terrain, "terrain_levels"):
+                terrain_levels_all = self._terrain.terrain_levels
+                log_dict["terrain_level_mean"] = float(
+                    terrain_levels_all.to(dtype=torch.float32).mean().item()
+                )
+                log_dict["terrain_level_min"] = float(terrain_levels_all.min().item())
+                log_dict["terrain_level_max"] = float(terrain_levels_all.max().item())
+                log_dict["terrain_curriculum_avg_track_rew_xy"] = float(
+                    self._terrain_curriculum_last_avg_track_rew_xy
+                )
+                log_dict["terrain_curriculum_threshold_xy"] = float(
+                    self._terrain_curriculum_last_threshold_xy
+                )
+                log_dict["terrain_curriculum_move_up_count"] = float(
+                    self._terrain_curriculum_last_move_up_count
+                )
+                log_dict["terrain_curriculum_move_down_count"] = float(
+                    self._terrain_curriculum_last_move_down_count
+                )
+                log_dict["terrain_curriculum_timeout_ratio"] = float(
+                    self._terrain_curriculum_last_timeout_ratio
+                )
 
         # add basic reward log
         for key, value in basic_reward_log.items():
@@ -436,7 +474,11 @@ class G1AmpEnv(DirectRLEnv):
             try:
                 agent = getattr(self, "_skrl_agent")
                 for k, v in log_dict.items():
-                    if k.startswith("cmd_") or k.startswith("curriculum_"):
+                    if (
+                        k.startswith("cmd_")
+                        or k.startswith("curriculum_")
+                        or k.startswith("terrain_")
+                    ):
                         agent.track_data(f"Curriculum / {k}", v)
                     else:
                         agent.track_data(f"Reward / {k}", v)
@@ -547,6 +589,9 @@ class G1AmpEnv(DirectRLEnv):
                             min(z_max + delta, z_lim[1]),
                         )
 
+        if self.enable_terrain_curriculum and len(env_ids) > 0:
+            self._update_terrain_curriculum(env_ids, pre_reset_episode_length)
+
         self._episode_track_vel_sum[env_ids] = 0.0
         self._episode_track_ang_vel_z_sum[env_ids] = 0.0
 
@@ -578,7 +623,7 @@ class G1AmpEnv(DirectRLEnv):
         self, env_ids: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         root_state = self.robot.data.default_root_state[env_ids].clone()
-        root_state[:, :3] += self.scene.env_origins[env_ids]
+        root_state[:, :3] += self._terrain.env_origins[env_ids]
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
         return root_state, joint_pos, joint_vel
@@ -613,7 +658,7 @@ class G1AmpEnv(DirectRLEnv):
         motion_torso_index = self._motion_loader.get_body_index(["pelvis"])[0]
         root_state = self.robot.data.default_root_state[env_ids].clone()
         root_state[:, 0:3] = (
-            body_positions[:, motion_torso_index] + self.scene.env_origins[env_ids]
+            body_positions[:, motion_torso_index] + self._terrain.env_origins[env_ids]
         )
         root_state[
             :, 2
@@ -667,6 +712,56 @@ class G1AmpEnv(DirectRLEnv):
             self.command_time_left[env_ids] = float("inf")
 
         return root_state, dof_pos, dof_vel
+
+    def _update_terrain_curriculum(
+        self, env_ids: torch.Tensor, pre_reset_episode_length: torch.Tensor
+    ) -> None:
+        if not hasattr(self._terrain, "terrain_levels"):
+            return
+        if len(env_ids) == 0:
+            return
+        if getattr(self, "common_step_counter", 0) <= 0:
+            return
+
+        move_up = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+        move_down = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+        time_out_mask = pre_reset_episode_length >= self.max_episode_length - 1
+
+        threshold_ratio = float(
+            getattr(self.cfg, "terrain_curriculum_threshold_ratio", 0.8)
+        )
+        threshold_xy = float(self.cfg.rew_track_vel * threshold_ratio)
+        self._terrain_curriculum_last_threshold_xy = threshold_xy
+
+        avg_track_rew_xy = 0.0
+        if self.cfg.rew_track_vel > 0.0:
+            completed_steps = (pre_reset_episode_length + 1).to(dtype=torch.float32)
+            episode_avg_track_rew_xy = self._episode_track_vel_sum[env_ids] / torch.clamp(
+                completed_steps, min=1.0
+            )
+            avg_track_rew_xy = float(episode_avg_track_rew_xy.mean().item())
+            move_up = time_out_mask & (episode_avg_track_rew_xy > threshold_xy)
+        else:
+            move_up = time_out_mask
+
+        if bool(getattr(self.cfg, "terrain_curriculum_move_down_on_fall", True)):
+            move_down = ~time_out_mask
+
+        move_down = move_down & (~move_up)
+        self._terrain.update_env_origins(env_ids, move_up, move_down)
+
+        self._terrain_curriculum_last_avg_track_rew_xy = avg_track_rew_xy
+        self._terrain_curriculum_last_move_up_count = float(move_up.sum().item())
+        self._terrain_curriculum_last_move_down_count = float(move_down.sum().item())
+        self._terrain_curriculum_last_timeout_ratio = float(
+            time_out_mask.to(dtype=torch.float32).mean().item()
+        )
+        updated_levels = self._terrain.terrain_levels[env_ids]
+        self._terrain_curriculum_last_level_mean = float(
+            updated_levels.to(dtype=torch.float32).mean().item()
+        )
+        self._terrain_curriculum_last_level_min = float(updated_levels.min().item())
+        self._terrain_curriculum_last_level_max = float(updated_levels.max().item())
 
     # env methods
 
