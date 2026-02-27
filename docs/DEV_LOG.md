@@ -396,3 +396,94 @@ python -m humanoid_amp.train \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --headless
 ```
+
+## Feature Update
+
+- **Date**: 2026-02-27
+- **Action**: 为 `play_deploy.py` 增加“headless 推理并保存视频”快捷模式。
+- **Details**:
+    - **文件**: `play_deploy.py`
+    - 新增参数解析函数 `parse_args()`，统一处理位置参数与功能开关。
+    - 新增 `--headless-video`（等价于同时传递 `--headless` 与 `--video`）。
+    - 新增 `--video_length`（默认 `300`），用于控制录制步数。
+    - 保持原有用法兼容：
+      `python play_deploy.py` 与 `python play_deploy.py <checkpoint>` 仍可直接使用。
+- **Execution Record**:
+```bash
+python play_deploy.py --help
+
+python -m py_compile \
+  play_deploy.py
+
+python play_deploy.py \
+  --headless-video \
+  --video_length 300
+```
+
+## Bug Fix
+
+- **Date**: 2026-02-27
+- **Action**: 修复 `headless + video` 录屏中镜头未拍到机器人问题。
+- **Details**:
+    - **文件**: `play.py`
+    - 在视频模式下新增相机跟随逻辑：优先将 viewport 相机对准 `env_0` 机器人参考刚体，并在仿真循环中持续更新视角。
+    - 当环境不支持该能力时打印警告并回退到默认相机，避免中断 play 流程。
+    - **文件**: `play_deploy.py`
+    - 新增 `--num_envs` 参数用于手动覆盖环境数量。
+    - 在视频模式（`--video`/`--headless-video`）且未手动指定 `--num_envs` 时，默认使用 `num_envs=1`，降低多环境布局导致镜头偏离目标的风险。
+- **Execution Record**:
+```bash
+python play_deploy.py --help
+
+python -m py_compile \
+  play_deploy.py \
+  play.py
+
+python play_deploy.py \
+  --headless-video \
+  --video_length 300
+```
+
+## Tool Enhancement
+
+- **Date**: 2026-02-27
+- **Action**: 优化 `play.py` 录屏命名，便于区分不同 checkpoint 的视频结果。
+- **Details**:
+    - **文件**: `play.py`
+    - 视频录制参数新增 `name_prefix`，格式为 `{CheckpointName}_{Timestamp}`。
+    - 实现方式：从 `resume_path` 提取 checkpoint 文件名，并拼接当前时间戳（`%Y-%m-%d_%H-%M-%S`）。
+- **Execution Record**:
+```bash
+python -m py_compile \
+  play.py \
+  play_deploy.py
+```
+
+## Feature Update
+
+- **Date**: 2026-02-27
+- **Action**: 支持多环境地形场景的视频全景录制，避免仅看到单机器人。
+- **Details**:
+    - **文件**: `play.py`
+    - 新增 `--video_camera_mode {follow,overview}` 参数。
+    - `follow`: 镜头跟随 `env_0` 机器人（适合单环境特写）。
+    - `overview`: 镜头自动拉远并对准环境原点中心（适合多环境地形总览）。
+    - 多环境下优先可视化地形分布，若 `overview` 不可用自动回退到 `follow`。
+    - **文件**: `play_deploy.py`
+    - 视频模式默认不再强制 `num_envs=1`，恢复使用配置常量 `NUM_ENVS`（当前为 32）。
+    - 新增 `--video_camera_mode` 透传参数。
+    - 未手动指定时，自动策略为：`num_envs>1 => overview`，`num_envs==1 => follow`。
+- **Execution Record**:
+```bash
+python play_deploy.py --help
+
+python -m py_compile \
+  play.py \
+  play_deploy.py
+
+python play_deploy.py \
+  --headless-video \
+  --num_envs 32 \
+  --video_camera_mode overview \
+  --video_length 300
+```

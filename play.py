@@ -8,6 +8,8 @@ Script to play a checkpoint of an RL agent from skrl.
 
 Visit the skrl documentation (https://skrl.readthedocs.io) to see the examples structured in
 a more user-friendly way.
+
+Video recording mode keeps camera view aligned with the first environment robot when possible.
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -21,6 +23,13 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument(
+    "--video_camera_mode",
+    type=str,
+    default="follow",
+    choices=["follow", "overview"],
+    help="Video camera behavior: follow env_0 robot or overview all envs.",
+)
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -75,6 +84,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import os
+import datetime
 import random
 import time
 
@@ -127,6 +137,57 @@ else:
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, experiment_cfg: dict):
     """Play with skrl agent."""
+
+    def _set_camera_view(sim_env, eye: list[float], target: list[float]) -> bool:
+        """Best-effort camera setter across wrappers/backends."""
+        try:
+            base_env = sim_env.unwrapped
+            base_env.sim.set_camera_view(eye, target)
+            return True
+        except Exception:
+            pass
+        try:
+            sim_env.set_camera_view(eye, target)
+            return True
+        except Exception:
+            return False
+
+    def _update_video_camera_follow(sim_env) -> bool:
+        """Keep viewport camera centered on env_0 robot."""
+        try:
+            base_env = sim_env.unwrapped
+            robot = getattr(base_env, "robot", None)
+            ref_body_index = getattr(base_env, "ref_body_index", None)
+            if robot is None or ref_body_index is None:
+                return False
+            ref_pos = robot.data.body_pos_w[0, ref_body_index]
+            target = [float(ref_pos[0].item()), float(ref_pos[1].item()), float(ref_pos[2].item())]
+            eye = [target[0] + 2.5, target[1] + 2.5, target[2] + 1.4]
+            return _set_camera_view(sim_env, eye, target)
+        except Exception:
+            return False
+
+    def _set_video_camera_overview(sim_env) -> bool:
+        """Place camera to capture all spawned environments from an overview perspective."""
+        try:
+            base_env = sim_env.unwrapped
+            terrain = getattr(base_env, "_terrain", None)
+            env_origins = getattr(terrain, "env_origins", None)
+            if env_origins is None:
+                return False
+            origins = env_origins[:, :3]
+            center = origins.mean(dim=0)
+            min_xy = origins[:, :2].min(dim=0).values
+            max_xy = origins[:, :2].max(dim=0).values
+            span_xy = max_xy - min_xy
+            half_extent = float(torch.max(span_xy).item()) * 0.5
+            camera_dist = max(12.0, half_extent + 8.0)
+            target = [float(center[0].item()), float(center[1].item()), float(center[2].item())]
+            eye = [target[0] + camera_dist, target[1] + camera_dist, target[2] + camera_dist * 0.9]
+            return _set_camera_view(sim_env, eye, target)
+        except Exception:
+            return False
+
     # grab task name for checkpoint path
     task_name = args_cli.task.split(":")[-1]
     train_task_name = task_name.replace("-Play", "")
@@ -182,10 +243,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # wrap for video recording
     if args_cli.video:
+        ckpt_name = os.path.basename(resume_path).split(".")[0]
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
+            "name_prefix": f"{ckpt_name}_{timestamp}",
             "disable_logger": True,
         }
         print("[INFO] Recording videos during training.")
@@ -232,10 +296,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # reset environment
     obs, _ = env.reset()
+    video_camera_follow_enabled = False
+    if args_cli.video:
+        if args_cli.video_camera_mode == "overview":
+            if _set_video_camera_overview(env):
+                print("[INFO] Video camera mode: overview (capturing multiple envs).")
+            else:
+                video_camera_follow_enabled = _update_video_camera_follow(env)
+                if video_camera_follow_enabled:
+                    print("[WARN] Overview camera unavailable, fallback to follow env_0 robot.")
+                else:
+                    print("[WARN] Video camera setup failed; using default viewport camera.")
+        else:
+            video_camera_follow_enabled = _update_video_camera_follow(env)
+            if video_camera_follow_enabled:
+                print("[INFO] Video camera mode: follow (tracking env_0 robot).")
+            else:
+                print("[WARN] Video camera follow is unavailable; using default viewport camera.")
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
+        if args_cli.video and video_camera_follow_enabled:
+            _update_video_camera_follow(env)
 
         # run everything in inference mode
         with torch.inference_mode():
@@ -249,6 +332,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                 actions = outputs[-1].get("mean_actions", outputs[0])
             # env stepping
             obs, _, _, _, _ = env.step(actions)
+        if args_cli.video and video_camera_follow_enabled:
+            _update_video_camera_follow(env)
         if args_cli.video:
             timestep += 1
             # exit the play loop after recording one video
