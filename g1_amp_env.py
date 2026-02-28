@@ -95,6 +95,7 @@ class G1AmpEnv(DirectRLEnv):
         self.command_time_left = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float32
         )
+        self.fixed_command_target_speed: torch.Tensor | None = None
         self._episode_track_vel_sum = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float32
         )
@@ -173,9 +174,41 @@ class G1AmpEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
+    def set_fixed_command_targets(self, command_targets: torch.Tensor):
+        """Set fixed per-environment velocity commands used during play."""
+        if not self.enable_command_tracking:
+            raise RuntimeError("Command tracking is disabled in the current environment config.")
+        expected_shape = (self.num_envs, self.command_dim)
+        if tuple(command_targets.shape) != expected_shape:
+            raise ValueError(
+                f"Invalid command_targets shape {tuple(command_targets.shape)}, expected {expected_shape}."
+            )
+        fixed_commands = command_targets.to(device=self.device, dtype=torch.float32)
+        if not torch.isfinite(fixed_commands).all():
+            raise ValueError("command_targets contains non-finite values.")
+        self.fixed_command_target_speed = fixed_commands.clone()
+        self._apply_fixed_command_targets()
+
+    def clear_fixed_command_targets(self):
+        self.fixed_command_target_speed = None
+
+    def _apply_fixed_command_targets(self, env_ids: torch.Tensor | None = None):
+        if self.fixed_command_target_speed is None:
+            return
+        if env_ids is None:
+            self.command_target_speed.copy_(self.fixed_command_target_speed)
+            self.command_time_left.fill_(float("inf"))
+            return
+        self.command_target_speed[env_ids] = self.fixed_command_target_speed[env_ids]
+        self.command_time_left[env_ids] = float("inf")
+
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone()
         # self.pre_actions = actions.clone()
+
+        if self.fixed_command_target_speed is not None:
+            self._apply_fixed_command_targets()
+            return
 
         # update command timers
         self.command_time_left -= self.step_dt
@@ -571,6 +604,8 @@ class G1AmpEnv(DirectRLEnv):
             # _get_observations will warm-start the buffer with the real
             # first observation on the next step.
             self._just_reset_mask[env_ids] = True
+        if self.fixed_command_target_speed is not None:
+            self._apply_fixed_command_targets(env_ids)
 
     # reset strategies
 

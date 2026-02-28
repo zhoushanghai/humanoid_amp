@@ -13,6 +13,7 @@ a more user-friendly way.
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import json
 import sys
 
 from isaaclab.app import AppLauncher
@@ -36,6 +37,12 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
+parser.add_argument(
+    "--speed_config",
+    type=str,
+    default=None,
+    help="Path to a JSON file with per-environment target speeds for play.",
+)
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--use_pretrained_checkpoint",
@@ -124,6 +131,108 @@ else:
     algorithm = agent_cfg_entry_point.split("_cfg")[0].split("skrl_")[-1].lower()
 
 
+def _parse_speed_entry(raw_entry, command_dim: int, env_index: int) -> list[float]:
+    """Parse one env speed entry into [vx, vy, (wz)]."""
+    vx = 0.0
+    vy = 0.0
+    wz = 0.0
+    if isinstance(raw_entry, (int, float)):
+        vx = float(raw_entry)
+    elif isinstance(raw_entry, (list, tuple)):
+        if len(raw_entry) == 0 or len(raw_entry) > 3:
+            raise ValueError(f"Invalid speed entry length at index {env_index}: {len(raw_entry)} (expected 1~3).")
+        vx = float(raw_entry[0])
+        if len(raw_entry) > 1:
+            vy = float(raw_entry[1])
+        if len(raw_entry) > 2:
+            wz = float(raw_entry[2])
+    elif isinstance(raw_entry, dict):
+        vx = float(raw_entry.get("vx", raw_entry.get("lin_vel_x", 0.0)))
+        vy = float(raw_entry.get("vy", raw_entry.get("lin_vel_y", 0.0)))
+        wz = float(raw_entry.get("wz", raw_entry.get("ang_vel_z", 0.0)))
+    else:
+        raise ValueError(
+            f"Invalid speed entry type at index {env_index}: {type(raw_entry).__name__}. "
+            "Use number / list / dict."
+        )
+
+    if command_dim == 2:
+        if abs(wz) > 1e-6:
+            raise ValueError(
+                f"Speed entry index {env_index} contains wz={wz}, but env command_dim is 2 (no yaw command)."
+            )
+        return [vx, vy]
+    return [vx, vy, wz]
+
+
+def _load_speed_config(speed_config_path: str, num_envs: int, command_dim: int) -> torch.Tensor:
+    with open(speed_config_path, "r", encoding="utf-8") as f:
+        speed_data = json.load(f)
+
+    entries = speed_data.get("commands", speed_data) if isinstance(speed_data, dict) else speed_data
+    command_targets = torch.zeros((num_envs, command_dim), dtype=torch.float32)
+    filled = torch.zeros((num_envs,), dtype=torch.bool)
+
+    # Explicit env mapping style:
+    # {"commands": {"env_0": {...}, "env_1": {...}}}
+    if isinstance(entries, dict):
+        for raw_key, raw_entry in entries.items():
+            key_str = str(raw_key)
+            if key_str.startswith("env_"):
+                env_index = int(key_str.split("env_", maxsplit=1)[1])
+            else:
+                env_index = int(key_str)
+            if env_index < 0 or env_index >= num_envs:
+                raise ValueError(f"Invalid env index in speed config: {env_index} (num_envs={num_envs}).")
+            command_targets[env_index] = torch.tensor(
+                _parse_speed_entry(raw_entry, command_dim, env_index), dtype=torch.float32
+            )
+            filled[env_index] = True
+    # Legacy list style (index == env id):
+    # {"commands": [0.2, 0.3, ...]}
+    elif isinstance(entries, list):
+        if len(entries) != num_envs:
+            raise ValueError(
+                f"Speed config contains {len(entries)} entries, but current num_envs is {num_envs}."
+            )
+        for env_index, raw_entry in enumerate(entries):
+            command_targets[env_index] = torch.tensor(
+                _parse_speed_entry(raw_entry, command_dim, env_index), dtype=torch.float32
+            )
+            filled[env_index] = True
+    else:
+        raise ValueError(
+            "Speed config must be a list, or a dict containing a 'commands' list/dict."
+        )
+
+    missing_envs = (~filled).nonzero(as_tuple=False).flatten().tolist()
+    if missing_envs:
+        raise ValueError(f"Missing speed entries for env ids: {missing_envs}")
+    return command_targets
+
+
+def _apply_speed_config_if_needed(env):
+    if not args_cli.speed_config:
+        return
+
+    unwrapped_env = env.unwrapped
+    if not hasattr(unwrapped_env, "set_fixed_command_targets"):
+        raise RuntimeError(
+            "--speed_config is only supported by environments implementing set_fixed_command_targets()."
+        )
+    command_dim = int(getattr(unwrapped_env, "command_dim", 0))
+    if command_dim not in (2, 3):
+        raise RuntimeError(f"Unsupported env command_dim={command_dim}.")
+
+    speed_config_path = os.path.expanduser(args_cli.speed_config)
+    command_targets = _load_speed_config(speed_config_path, int(unwrapped_env.num_envs), command_dim)
+    unwrapped_env.set_fixed_command_targets(command_targets)
+    print(
+        f"[INFO] Loaded fixed speed config from {speed_config_path}. "
+        f"Applied {command_targets.shape[0]} env commands with dim={command_targets.shape[1]}."
+    )
+
+
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, experiment_cfg: dict):
     """Play with skrl agent."""
@@ -173,6 +282,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
         env = multi_agent_to_single_agent(env)
+
+    _apply_speed_config_if_needed(env)
 
     # get environment (step) dt for real-time evaluation
     try:

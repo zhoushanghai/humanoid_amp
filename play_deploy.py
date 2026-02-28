@@ -7,6 +7,7 @@ play_deploy.py — 自动寻找最新 Checkpoint 并启动推理，或打开 Ten
     python play_deploy.py <checkpoint_path>  # 手动指定 checkpoint 并推理
     python play_deploy.py --tb               # 自动找最新 run 目录，打开 TensorBoard
 
+默认会自动附加 `--speed_config`（若文件存在）。
 项目专属配置集中在 "── 项目配置 ──" 区域，移植到其他项目时只需修改那一块。
 """
 
@@ -26,6 +27,8 @@ LOG_BASE = "logs/skrl/g1_amp_dance"
 CHECKPOINT_SUBDIR = "checkpoints"
 # 要匹配的 checkpoint 文件 glob
 CHECKPOINT_PATTERN = "agent_*.pt"
+# play 速度配置文件（相对于项目根目录）
+SPEED_CONFIG = "configs/play_speed_32.example.json"
 # 从文件名中提取 step 数字的正则
 STEP_REGEX = re.compile(r"agent_(\d+)\.pt$")
 # ──────────────────────────────────────────────────────────────────────────────
@@ -114,6 +117,12 @@ def main():
         "--checkpoint",
         checkpoint,
     ]
+    speed_config_path = Path(SPEED_CONFIG)
+    if speed_config_path.is_file():
+        cmd.extend(["--speed_config", str(speed_config_path)])
+        print(f"[INFO] 使用速度配置: {speed_config_path}")
+    else:
+        print(f"[WARN] 速度配置文件不存在，跳过 --speed_config: {speed_config_path}")
 
     print(f"[INFO] 执行命令: {' '.join(cmd)}")
     os.execvp(cmd[0], cmd)  # 替换当前进程，信号传递更干净

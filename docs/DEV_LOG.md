@@ -101,6 +101,7 @@ python -m humanoid_amp.play \
 - **[2026-02-23]** `git commit`: docs(ablation): 记录实验②成功并准备实验③ / record success of phase ② and prep phase ③
 - **[2026-02-23]** `git commit`: docs(ablation): 记录实验③成功并准备实验④ / record success of phase ③ and prep phase ④
 - **[2026-02-23]** `git commit`: docs(ablation): 消融实验圆满完成，记录实验④结果 / ablation study completed, record phase ④ results
+- **[2026-02-28]** `git commit`: feat(play): 增加固定速度配置 / add fixed speed config
 
 ## 工具优化
 
@@ -348,4 +349,100 @@ python -m humanoid_amp.play \
 python -m humanoid_amp.train \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --headless
+```
+
+## Feature Update
+
+- **Date**: 2026-02-28
+- **Action**: 为 `play` 增加“按参数文件固定 32 环境速度命令”的能力。
+- **Details**:
+    - **文件**: `play.py`
+    - 新增参数 `--speed_config`，读取 JSON 配置并校验条目数必须等于 `num_envs`。
+    - 支持三种条目格式：数字（`vx`）、列表（`[vx, vy, wz]`）和字典（`{"vx":...,"vy":...,"wz":...}`）。
+    - 在建环境后调用环境接口注入固定速度，避免随机命令覆盖。
+    - **文件**: `g1_amp_env.py`
+    - 新增 `set_fixed_command_targets()` / `clear_fixed_command_targets()`。
+    - 在 `_pre_physics_step()` 与 `_reset_idx()` 中增加固定命令覆盖逻辑，确保重置后仍保持指定速度。
+    - **文件**: `configs/play_speed_32.example.json`
+    - 新增 32 环境速度示例配置文件。
+    - **文件**: `README.md`
+    - 新增 `--speed_config` 用法说明与示例命令。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/<run>/checkpoints/agent_<step>.pt \
+  --speed_config configs/play_speed_32.example.json \
+  --video \
+  --video_length 300
+```
+
+## Feature Update
+
+- **Date**: 2026-02-28
+- **Action**: 将 `play` 速度配置 JSON 改为更直观的“每个 env 显式一行”写法。
+- **Details**:
+    - **文件**: `configs/play_speed_32.example.json`
+    - 将原先按数组索引隐式对应 env 的写法，改为显式映射：`"env_0"` ~ `"env_31"`。
+    - 每个 env 在同一行内声明：`{"vx": ..., "vy": ..., "wz": ...}`。
+    - **文件**: `play.py`
+    - `--speed_config` 解析逻辑新增对 dict 映射格式的支持：`{"commands": {"env_0": {...}}}`。
+    - 继续兼容旧数组格式（索引 = env id）。
+    - **文件**: `README.md`
+    - 更新 speed config 说明，推荐显式 env 映射格式。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/<run>/checkpoints/agent_<step>.pt \
+  --speed_config configs/play_speed_32.example.json \
+  --video \
+  --video_length 300
+```
+
+## Config Update
+
+- **Date**: 2026-02-28
+- **Action**: 按 Deploy 任务最大课程范围重设 `play` 的 32 环境速度配置。
+- **Details**:
+    - **文件**: `configs/play_speed_32.example.json`
+    - 依据 `g1_amp_env_cfg.py` 中 `G1AmpDeployEnvCfg` 的课程上限范围：
+      `command_lin_vel_x_curriculum_limit_range = (-1.0, 5.0)`，
+      `command_lin_vel_y_curriculum_limit_range = (-2.0, 2.0)`，
+      `command_ang_vel_z_curriculum_limit_range = (-1.0, 1.0)`。
+    - 将 32 个 `env_x` 显式映射到全区间覆盖：
+      - `vx` 从 `-1.00` 到 `5.00` 递增分布；
+      - `vy` 分 4 段覆盖 `-2.00 / -0.67 / 0.67 / 2.00`；
+      - `wz` 循环覆盖 `-1.00 / -0.33 / 0.33 / 1.00`。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/<run>/checkpoints/agent_<step>.pt \
+  --speed_config configs/play_speed_32.example.json \
+  --video \
+  --video_length 300
+```
+
+## Feature Update
+
+- **Date**: 2026-02-28
+- **Action**: 将速度配置接入 `play_deploy.py`，默认自动透传给 `play.py`。
+- **Details**:
+    - **文件**: `play_deploy.py`
+    - 在项目配置区新增 `SPEED_CONFIG = "configs/play_speed_32.example.json"`。
+    - 构建 `humanoid_amp.play` 命令时，若该文件存在则自动追加：
+      `--speed_config configs/play_speed_32.example.json`。
+    - 若文件不存在，输出 warning 并继续执行，不阻塞 play。
+    - 更新文件头部说明，明确脚本默认会尝试附加 `--speed_config`。
+- **Execution Record**:
+```bash
+python play_deploy.py
+```
+
+```bash
+python play_deploy.py logs/skrl/<run>/checkpoints/agent_<step>.pt
 ```

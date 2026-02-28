@@ -51,7 +51,42 @@ python -m humanoid_amp.train --task Isaac-G1-AMP-Walk-Direct-v0 --checkpoint log
 ## Eval
 
 ```bash
-python -m humanoid_amp.play --task Isaac-G1-AMP-Walk-Direct-v0 --num_envs 32 --checkpoint logs/skrl/<run>/checkpoints/Latest.ckpt
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Walk-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/<run>/checkpoints/Latest.ckpt
+```
+
+Use per-environment speed config (fixed command for each env):
+
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/<run>/checkpoints/agent_<step>.pt \
+  --speed_config configs/play_speed_32.example.json \
+  --video \
+  --video_length 300
+```
+
+`--speed_config` expects exactly `num_envs` commands, supports:
+- Explicit env map (recommended): `{"commands": {"env_0": {...}, "env_1": {...}}}`
+- Legacy list: `{"commands": [...]}` (index = env id)
+
+Each command entry supports:
+- Number: `vx`
+- List: `[vx]`, `[vx, vy]`, `[vx, vy, wz]`
+- Dict: `{"vx": ..., "vy": ..., "wz": ...}`
+
+Example:
+
+```json
+{
+  "commands": {
+    "env_0": {"vx": 0.2, "vy": 0.0, "wz": 0.0},
+    "env_1": {"vx": 0.3, "vy": 0.0, "wz": 0.1}
+  }
+}
 ```
 
 ## TensorBoard
