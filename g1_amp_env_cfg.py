@@ -107,6 +107,9 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     enable_track_vel_curriculum = False
     track_vel_curriculum_delta = 0.1
     track_vel_curriculum_threshold_ratio = 0.8
+    # Optional z-axis specific curriculum knobs (fallback to xy settings when omitted)
+    track_ang_vel_curriculum_delta = 0.1
+    track_ang_vel_curriculum_threshold_ratio = 0.8
     track_vel_curriculum_limit_range = (-1.0, 1.0)  # fallback for vx
     command_lin_vel_x_curriculum_limit_range = (-1.0, 1.0)
     command_lin_vel_y_curriculum_limit_range = (0.0, 0.0)
@@ -181,6 +184,8 @@ class G1AmpDeployEnvCfg(G1AmpEnvCfg_CUSTOM):
     include_ang_vel_command = True
     enable_track_vel_curriculum = True
     track_vel_curriculum_threshold_ratio = 0.8
+    # z-axis command tracking is typically harder than xy; use a dedicated threshold.
+    track_ang_vel_curriculum_threshold_ratio = 0.65
     command_lin_vel_x_curriculum_limit_range = (-1.0, 5.0)
     command_lin_vel_y_curriculum_limit_range = (-2.0, 2.0)
     command_ang_vel_z_curriculum_limit_range = (-1.0, 1.0)

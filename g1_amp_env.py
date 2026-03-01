@@ -104,11 +104,13 @@ class G1AmpEnv(DirectRLEnv):
         )
         self._curriculum_last_avg_track_rew_xy = 0.0
         self._curriculum_last_avg_track_rew_z = 0.0
+        ratio_xy = self._get_curriculum_ratio_xy()
+        ratio_z = self._get_curriculum_ratio_z()
         self._curriculum_last_threshold_xy = float(
-            self.cfg.rew_track_vel * self.cfg.track_vel_curriculum_threshold_ratio
+            self.cfg.rew_track_vel * ratio_xy
         )
         self._curriculum_last_threshold_z = float(
-            self.rew_track_ang_vel_z * self.cfg.track_vel_curriculum_threshold_ratio
+            self.rew_track_ang_vel_z * ratio_z
         )
         self._curriculum_last_triggered_xy = 0.0
         self._curriculum_last_triggered_z = 0.0
@@ -173,6 +175,30 @@ class G1AmpEnv(DirectRLEnv):
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+
+    def _get_curriculum_ratio_xy(self) -> float:
+        return float(getattr(self.cfg, "track_vel_curriculum_threshold_ratio", 0.8))
+
+    def _get_curriculum_ratio_z(self) -> float:
+        return float(
+            getattr(
+                self.cfg,
+                "track_ang_vel_curriculum_threshold_ratio",
+                self._get_curriculum_ratio_xy(),
+            )
+        )
+
+    def _get_curriculum_delta_xy(self) -> float:
+        return float(getattr(self.cfg, "track_vel_curriculum_delta", 0.1))
+
+    def _get_curriculum_delta_z(self) -> float:
+        return float(
+            getattr(
+                self.cfg,
+                "track_ang_vel_curriculum_delta",
+                self._get_curriculum_delta_xy(),
+            )
+        )
 
     def set_fixed_command_targets(self, command_targets: torch.Tensor):
         """Set fixed per-environment velocity commands used during play."""
@@ -428,9 +454,12 @@ class G1AmpEnv(DirectRLEnv):
                 log_dict["cmd_ang_vel_z_min"] = float(self.command_ang_vel_z_range[0])
                 log_dict["cmd_ang_vel_z_max"] = float(self.command_ang_vel_z_range[1])
             if getattr(self.cfg, "enable_track_vel_curriculum", False):
-                ratio = self.cfg.track_vel_curriculum_threshold_ratio
-                current_threshold_xy = float(self.cfg.rew_track_vel * ratio)
-                current_threshold_z = float(self.rew_track_ang_vel_z * ratio)
+                current_threshold_xy = float(
+                    self.cfg.rew_track_vel * self._get_curriculum_ratio_xy()
+                )
+                current_threshold_z = float(
+                    self.rew_track_ang_vel_z * self._get_curriculum_ratio_z()
+                )
                 log_dict["curriculum_avg_track_rew_xy"] = float(
                     self._curriculum_last_avg_track_rew_xy
                 )
@@ -509,9 +538,10 @@ class G1AmpEnv(DirectRLEnv):
                 completed_steps = (pre_reset_episode_length[time_out_mask] + 1).to(
                     dtype=torch.float32
                 )
-                ratio = self.cfg.track_vel_curriculum_threshold_ratio
+                ratio_xy = self._get_curriculum_ratio_xy()
+                ratio_z = self._get_curriculum_ratio_z()
                 avg_track_rew_xy = 0.0
-                threshold_xy = float(self.cfg.rew_track_vel * ratio)
+                threshold_xy = float(self.cfg.rew_track_vel * ratio_xy)
                 if self.cfg.rew_track_vel > 0.0:
                     avg_track_rew_xy = float(
                         torch.mean(
@@ -521,7 +551,7 @@ class G1AmpEnv(DirectRLEnv):
                     )
 
                 avg_track_rew_z = 0.0
-                threshold_z = float(self.rew_track_ang_vel_z * ratio)
+                threshold_z = float(self.rew_track_ang_vel_z * ratio_z)
                 if self.include_ang_vel_command and self.rew_track_ang_vel_z > 0.0:
                     avg_track_rew_z = float(
                         torch.mean(
@@ -544,7 +574,8 @@ class G1AmpEnv(DirectRLEnv):
                     and avg_track_rew_z > threshold_z
                 )
                 if trigger_xy or trigger_z:
-                    delta = self.cfg.track_vel_curriculum_delta
+                    delta_xy = self._get_curriculum_delta_xy()
+                    delta_z = self._get_curriculum_delta_z()
                     x_lim = getattr(
                         self.cfg,
                         "command_lin_vel_x_curriculum_limit_range",
@@ -565,19 +596,19 @@ class G1AmpEnv(DirectRLEnv):
                         x_min, x_max = self.command_lin_vel_x_range
                         y_min, y_max = self.command_lin_vel_y_range
                         self.command_lin_vel_x_range = (
-                            max(x_min - delta, x_lim[0]),
-                            min(x_max + delta, x_lim[1]),
+                            max(x_min - delta_xy, x_lim[0]),
+                            min(x_max + delta_xy, x_lim[1]),
                         )
                         self.command_lin_vel_y_range = (
-                            max(y_min - delta, y_lim[0]),
-                            min(y_max + delta, y_lim[1]),
+                            max(y_min - delta_xy, y_lim[0]),
+                            min(y_max + delta_xy, y_lim[1]),
                         )
                     if trigger_z:
                         self._curriculum_last_triggered_z = 1.0
                         z_min, z_max = self.command_ang_vel_z_range
                         self.command_ang_vel_z_range = (
-                            max(z_min - delta, z_lim[0]),
-                            min(z_max + delta, z_lim[1]),
+                            max(z_min - delta_z, z_lim[0]),
+                            min(z_max + delta_z, z_lim[1]),
                         )
 
         self._episode_track_vel_sum[env_ids] = 0.0

@@ -446,3 +446,30 @@ python play_deploy.py
 ```bash
 python play_deploy.py logs/skrl/<run>/checkpoints/agent_<step>.pt
 ```
+
+## Bug Fix
+
+- **Date**: 2026-02-28
+- **Action**: 修复 Deploy 训练中 z 轴角速度 curriculum 不易触发的问题（与 xy 轴解耦）。
+- **Details**:
+    - **文件**: `g1_amp_env.py`
+    - 将 curriculum 阈值由“xy/z 共用 `track_vel_curriculum_threshold_ratio`”改为分轴读取：
+      - xy: `track_vel_curriculum_threshold_ratio`
+      - z: `track_ang_vel_curriculum_threshold_ratio`（缺省回退到 xy）
+    - 将 curriculum 扩展步长由“统一 `track_vel_curriculum_delta`”改为支持 z 轴独立步长：
+      - xy: `track_vel_curriculum_delta`
+      - z: `track_ang_vel_curriculum_delta`（缺省回退到 xy）
+    - 同步更新 `curriculum_threshold_z` 日志计算，避免日志与实际触发判据不一致。
+    - **文件**: `g1_amp_env_cfg.py`
+    - 新增可配置项：
+      - `track_ang_vel_curriculum_threshold_ratio`
+      - `track_ang_vel_curriculum_delta`
+    - 在 `G1AmpDeployEnvCfg` 中设置
+      `track_ang_vel_curriculum_threshold_ratio = 0.65`，
+      让 z 轴在早期训练更容易触发课程扩展。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
