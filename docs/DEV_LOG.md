@@ -596,3 +596,30 @@ conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
   --step_min 0 \
   --step_max 3000000
 ```
+
+## Documentation Update
+
+- **Date**: 2026-03-03
+- **Action**: 精简 `README.md`，仅保留安装、训练、Play 三部分。
+- **Details**:
+    - 将 README 重构为三个最小必要章节：`安装`、`训练`、`Play`。
+    - 统一命令展示格式，训练与 Play 使用多行参数，便于直接复制与修改。
+    - 移除与核心上手流程无关的冗余表述。
+- **Execution Record**:
+
+```bash
+pip install -e .
+
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --num_envs 32 \
+  --checkpoint logs/skrl/g1_amp_dance/2026-02-22_11-40-31_ppo_torch/checkpoints/agent_50000.pt
+```
+
+## 关键命令
+
+- **[2026-03-03]** `git commit`: docs(readme): 精简安装训练Play说明 / simplify install train play docs
