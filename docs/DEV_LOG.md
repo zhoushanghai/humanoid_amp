@@ -293,6 +293,7 @@ python -m humanoid_amp.train \
     - 在每步日志中直接按配置实时计算并写入 `curriculum_threshold`，避免因未触发 timeout 判定而保持 NaN。
     - `curriculum_margin` 改为使用实时阈值计算，确保曲线始终可读。
 - **[2026-02-25]** `git commit`: fix(env): 修复课程日志NaN / fix NaN curriculum logs
+- **[2026-03-03]** `git commit`: feat(plot): 新增课程命令范围绘图 / add curriculum command range plot
 
 ## Feature Update
 
@@ -472,4 +473,126 @@ python play_deploy.py logs/skrl/<run>/checkpoints/agent_<step>.pt
 python -m humanoid_amp.train \
   --task Isaac-G1-AMP-Deploy-Direct-v0 \
   --headless
+```
+
+## Storage Check
+
+- **Date**: 2026-03-03
+- **Action**: 排查各用户目录空间占用，定位磁盘大户。
+- **Details**:
+    - 统计 `/home` 下用户目录占用并按大小排序。
+    - 结果显示当前可统计范围内 `hz` 目录占用最大（约 `490G`）。
+    - 尝试使用 `sudo` 获取完整用户占用失败（需要密码），因此其他用户当前仅统计到目录层级大小。
+- **Execution Record**:
+```bash
+getent passwd | awk -F: '{print $1":"$6":"$7}'
+ls -la /home
+du -sh /home/* 2>/tmp/du_home_err.log | sort -h
+cat /tmp/du_home_err.log
+sudo -n du -sh /home/* | sort -h
+```
+
+## Feature Update
+
+- **Date**: 2026-03-03
+- **Action**: 新增 Curriculum 命令范围可视化脚本，并在指定 run 上生成图表。
+- **Details**:
+    - **文件**: `scripts/plot_curriculum_cmd.py`
+    - 新增 tfevents 解析与绘图入口，读取以下 3 组 `Curriculum /` 指标：
+      - `cmd_lin_vel_x_min/max`
+      - `cmd_lin_vel_y_min/max`
+      - `cmd_ang_vel_z_min/max`
+    - 图形输出为 3 个子图（x/y/z），每个子图同时绘制：
+      - `min` 边界线
+      - `max` 边界线
+      - `min~max` 区间带（fill band）
+    - 默认输出目录：`<event_file_parent>/charts/`，默认文件名 `curriculum_cmd_ranges.png`。
+    - 在 `g1_amp` conda 环境验证通过，并生成：
+      `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/charts/curriculum_cmd_ranges.png`。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
+  --event_file logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/events.out.tfevents.1772214025.rbm.2498113.0
+```
+
+## Feature Update
+
+- **Date**: 2026-03-03
+- **Action**: 为课程范围图新增可指定 iteration 区间的能力，并限制到 `0-3000000` 重绘。
+- **Details**:
+    - **文件**: `scripts/plot_curriculum_cmd.py`
+    - 新增命令行参数：
+      - `--step_min`
+      - `--step_max`
+    - 在绘图阶段通过 `set_xlim` 对 x 轴进行区间约束，可按指定 iteration 范围查看课程变化。
+    - 按需求用 `--step_min 0 --step_max 3000000` 重新生成图：
+      `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/charts/curriculum_cmd_ranges.png`。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
+  --event_file logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/events.out.tfevents.1772214025.rbm.2498113.0 \
+  --step_min 0 \
+  --step_max 3000000
+```
+
+## Style Update
+
+- **Date**: 2026-03-03
+- **Action**: 优化 Curriculum 范围图配色，改为三类指标三种主题色。
+- **Details**:
+    - **文件**: `scripts/plot_curriculum_cmd.py`
+    - 新增 `METRIC_THEME_COLORS`，为 3 个指标设置独立色板：
+      - `cmd_lin_vel_x`: Ocean Blue
+      - `cmd_lin_vel_y`: Sunset Orange
+      - `cmd_ang_vel_z`: Forest Green
+    - 每个子图内部保持同主题分层：
+      - `min` 边界线
+      - `max` 边界线
+      - `range` 区间带
+    - 子图标题增加主题名，便于快速识别不同指标。
+    - 已按 `0-3000000` 区间重新生成图：
+      `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/charts/curriculum_cmd_ranges.png`。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
+  --event_file logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/events.out.tfevents.1772214025.rbm.2498113.0 \
+  --step_min 0 \
+  --step_max 3000000
+```
+
+## Style Update
+
+- **Date**: 2026-03-03
+- **Action**: 调整上下限颜色语义与图例顺序，统一为 `max -> min -> range`。
+- **Details**:
+    - **文件**: `scripts/plot_curriculum_cmd.py`
+    - 颜色语义调整为：`max` 使用深色，`min` 使用浅色（三组主题色均同步）。
+    - 绘图顺序改为先绘制 `max` 再绘制 `min`，与语义保持一致。
+    - 每个子图图例显式重排为：`max`、`min`、`range`，保证和图形说明一致。
+    - 重新生成图：
+      `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/charts/curriculum_cmd_ranges.png`。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
+  --event_file logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/events.out.tfevents.1772214025.rbm.2498113.0 \
+  --step_min 0 \
+  --step_max 3000000
+```
+
+## Style Update
+
+- **Date**: 2026-03-03
+- **Action**: 统一三个子图图例位置，固定为与中间图一致的右侧居中。
+- **Details**:
+    - **文件**: `scripts/plot_curriculum_cmd.py`
+    - 将图例位置由自适应 `loc="best"` 改为固定 `loc="center right"`。
+    - 三个子图的图例现在位置一致，均为右侧居中，同时保持顺序 `max -> min -> range`。
+    - 已重新生成图：
+      `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/charts/curriculum_cmd_ranges.png`。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/plot_curriculum_cmd.py \
+  --event_file logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/events.out.tfevents.1772214025.rbm.2498113.0 \
+  --step_min 0 \
+  --step_max 3000000
 ```
