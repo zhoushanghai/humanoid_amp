@@ -792,6 +792,70 @@ fish -lc 'echo TMPDIR=$TMPDIR; python3 -c "import tempfile; print(tempfile.gette
 python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
 ```
 
+## Evaluation Logic Update
+
+- **Date**: 2026-03-05
+- **Action**: 每个测试项开始前重置机器人状态（不重建仿真环境）。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 新增开关 `reset_between_combos`（默认 `True`）。
+    - 在每个 combo（含 `max_vx/max_vy` 扫描和 `step_survival`）开始前执行：
+      - `env.reset()`
+      - 命令清零短暂稳定步进
+    - `run_meta.json` 新增 `reset_between_combos` 字段，便于回溯评测口径。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `reset_between_combos: true`。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Logic Update
+
+- **Date**: 2026-03-05
+- **Action**: 改为每个测试项从方队统一初始姿态开始，并在 reset 后直接进入测试。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增 `eval_reset_strategy` 配置（默认 `default`），评测时覆盖 `env_cfg.reset_strategy`。
+      - 移除每个测试项 reset 后的“命令清零 + 0.2s 过渡步进”，实现 reset 后直接开始该项测试流程。
+      - `run_meta.json` 新增 `eval_reset_strategy` 字段。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `eval_reset_strategy: default`（方队统一起始姿态）。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Logic Update
+
+- **Date**: 2026-03-05
+- **Action**: 修复“视频开头残留上一测试动作”问题，增加 reset 后同步步。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增 `reset_sync_steps`（默认 `2`）：
+        - 每次新测试项 `env.reset()` 后，先执行少量非统计同步步，再开始正式测试和录制。
+      - 目的：保证视频开头呈现重置后的方队状态，减少渲染残帧造成的“未重置”观感。
+      - `run_meta.json` 新增 `reset_sync_steps` 字段。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `reset_sync_steps: 2` 及注释。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Bug Fix
+
+- **Date**: 2026-03-05
+- **Action**: 修复评测脚本 `reset_sync_steps` 引入的递归错误。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 根因：`_reset_env_for_new_test()` 误调用自身，导致无限递归并触发 `RecursionError`。
+    - 修复：改为正确执行 `obs, _ = env.reset()`，随后再进行同步步进。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
 ## Experiment Record: Velocity Tracking Re-run (num_envs=100)
 
 - **Date**: 2026-03-05
@@ -834,4 +898,233 @@ conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
 - **Execution Record**:
 ```bash
 python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## 2026-03-05 关键命令
+
+```bash
+conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless \
+  --video \
+  --video_length 12000
+```
+
+## Evaluation Visualization
+
+- **Date**: 2026-03-05
+- **Action**: 调整评测视频输出为“每个测试项单独保存”，并写入当前结果目录。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 取消单一 `RecordVideo` 输出方式（`rl-video-step-0.mp4`）。
+    - 新增按测试项录制：每个 combo/step phase 生成独立 mp4，文件名为对应任务名（如 `low_lin_vx_0.50.mp4`）。
+    - 视频保存目录改为本次评测输出目录下 `videos/`，与 CSV/JSON 同目录管理。
+    - `run_meta.json` 新增 `video_dir` 字段。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Analysis Upgrade
+
+- **Date**: 2026-03-05
+- **Action**: 新增 per-env 级别评测明细与两张全局汇总图（深蓝/浅蓝交替）。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 逐测试项、逐环境记录：
+      - `record_survival_s`（仅 record 窗口存活时间）
+      - `tracking_acc`（按当前公式；record 中途倒地记 `NaN`）
+      - `tracking_metric`（`lin_acc` / `yaw_acc`）
+      - `survived_full_record`
+    - 新增输出文件：
+      - `metrics_per_env_details.csv`
+    - 新增全局图（不拆分子图）：
+      - `global_record_survival_boxplot.png`
+      - `global_tracking_acc_boxplot.png`
+    - 配色策略：
+      - 按组使用深蓝/浅蓝交替，不使用多色。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Visualization
+
+- **Date**: 2026-03-05
+- **Action**: 调整评测视频相机视角，扩大可视范围（轻微拉远 + 抬高）。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 仅在 `--video` 模式下对 `env_cfg.viewer` 生效：
+        - `video_camera_zoom_out`（默认 `1.25`）
+        - `video_camera_lift_z`（默认 `0.2`）
+      - 逻辑：围绕 `lookat` 做相机外扩，并上抬 z 轴。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增参数：
+        - `video_camera_zoom_out: 1.25`
+        - `video_camera_lift_z: 0.2`
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Reset/Video Sync Fix
+
+- **Date**: 2026-03-05
+- **Action**: 修复“新测试项视频开头出现上一测试残留片段”的时序问题。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 将 reset 触发位置内聚到测试函数内部：
+      - `_evaluate_combo(...)`
+      - `_evaluate_step_survival(...)`
+    - 新增参数：
+      - `reset_before_start`
+      - `reset_sync_steps_local`
+    - 逻辑调整：
+      - 在 `video_recorder.start(...)` 之前，先执行 `_reset_env_for_new_test(...)`。
+      - 强制至少同步 1 步（`max(1, reset_sync_steps_local)`），确保首帧来自当前测试项重置后状态。
+    - 主流程中移除外层重复 reset，统一由各评测函数在开始阶段执行，减少 reset/录制的时序漂移。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Video/Task Misalignment Fix
+
+- **Date**: 2026-03-05
+- **Action**: 排查并修复“视频开头串到上一测试动作”的问题。
+- **Details**:
+    - **根因定位**: 评测在 `env.reset()` 后直接切新视频文件，但未清空渲染缓存；Isaac 渲染存在 1~数帧延迟，导致新文件首帧可能来自上一测试。
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增配置读取：`video_render_flush_frames`（默认 8）。
+      - `PerComboVideoRecorder` 新增 `render_flush_frames` 参数。
+      - 在 `start()` 中先丢弃若干 `render()` 帧，再打开新视频文件写入器，避免首帧串片。
+      - `main()` 创建 `PerComboVideoRecorder` 时注入 `render_flush_frames=video_render_flush_frames`。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `video_render_flush_frames: 8`（可按机器渲染延迟调大）。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Video Forced Start Alignment
+
+- **Date**: 2026-03-05
+- **Action**: 增加“每段视频开头强制显示 reset 方阵”的对齐机制。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增参数读取：`video_reset_lead_in_s`（默认 `0.5` 秒）。
+      - 新增 `_record_video_reset_lead_in(...)`：
+        - 在视频段开始后、测试命令下发前，先设置零命令并录制一段前导画面。
+        - 该前导不参与统计指标，仅用于保证视频可解释性（先看到方阵重置，再进入命令动作）。
+      - `_evaluate_combo(...)` 与 `_evaluate_step_survival(...)` 接入上述前导逻辑。
+      - `run_meta.json` 增加 `video_reset_lead_in_s` 字段。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增配置：`video_reset_lead_in_s: 0.5`。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## 2026-03-05 关键命令
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+
+conda run -n g1_amp python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --headless
+```
+
+## 2026-03-05 关键命令
+
+```bash
+python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless
+
+python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless \
+  --video \
+  --video_length 1200
+
+conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless \
+  --video \
+  --video_length 1200
+```
+
+- **[2026-03-05]** `git commit`: fix(eval): 修复评测重置与视频对齐 / fix eval reset and video sync
+
+## Evaluation Reset Root-Cause Fix (skrl Wrapper Cache)
+
+- **Date**: 2026-03-05
+- **Action**: 修复“测试项之间看起来未重置”的真实根因。
+- **Details**:
+    - **根因定位**:
+      - `skrl` 的 `IsaacLabWrapper.reset()` 带 `_reset_once` 缓存逻辑，默认只在第一次调用时真正执行底层 `env.reset()`，后续直接返回缓存观测。
+      - 证据文件：`/home/hz/miniconda3/envs/g1_amp/lib/python3.11/site-packages/skrl/envs/wrappers/torch/isaaclab_envs.py` 第 72-78 行。
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 在 `_reset_env_for_new_test(...)` 中，每次重置前强制设置 `env._reset_once = True`（若该属性存在），保证每个测试项都会触发真实全量 reset。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Crash Fix (Inference Tensor on Reset)
+
+- **Date**: 2026-03-05
+- **Action**: 修复评测中途 reset 崩溃（`Inplace update to inference tensor outside InferenceMode is not allowed`）。
+- **Details**:
+    - **报错现象**:
+      - 在测试项切换触发 `env.reset()` 时，`g1_amp_env.py` 的 `_reset_idx` 写关节状态触发 RuntimeError。
+    - **根因定位**:
+      - 评测脚本 `_run_steps(...)` 使用了 `torch.inference_mode()` 包裹 `env.step()`，导致仿真内部缓冲出现 inference tensor。
+      - 后续 reset 的原地写入（joint_acc 等）在非 inference mode 下被 PyTorch 阻止。
+    - **修复文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - `_run_steps(...)` 改为仅对策略动作推理使用 `torch.no_grad()`。
+      - `env.step(...)` 移到 no_grad 外执行，避免污染环境内部状态张量类型。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Troubleshooting Knowledge Base Skill
+
+- **Date**: 2026-03-05
+- **Action**: 新增疑难问题沉淀 Skill，并落地项目级排错知识库文档。
+- **Details**:
+    - **Skill 路径**: `/home/hz/.codex/skills/troubleshooting-kb/SKILL.md`
+      - 触发目标: 当用户要求“记录/沉淀疑难问题、复盘现象-原因-处理”时，统一写入 `docs/TROUBLESHOOTING_KB.md`。
+      - 附带模板: `/home/hz/.codex/skills/troubleshooting-kb/references/case_template.md`
+    - **项目文档**: `docs/TROUBLESHOOTING_KB.md`
+      - 已写入本次案例: Velocity Tracking 评测中“视频错位 + reset 缓存 + inference tensor 崩溃”的完整复盘。
+- **Execution Record**:
+```bash
+# 新建 Skill 目录与文档
+mkdir -p /home/hz/.codex/skills/troubleshooting-kb/references
+
+# 新建项目知识库文档
+# docs/TROUBLESHOOTING_KB.md
+```
+
+## Troubleshooting Skill Simplification
+
+- **Date**: 2026-03-05
+- **Action**: 按要求精简 `troubleshooting-kb` Skill，去除目录/平台路径罗列，仅保留关键沉淀字段。
+- **Details**:
+    - **文件**: `/home/hz/.codex/skills/troubleshooting-kb/SKILL.md`
+      - 删除平台路径说明与目录相关内容。
+      - 新增明确约束：不写本地绝对路径、不写目录结构清单。
+      - 固定输出为 5 段：问题表现、根因分析、处理动作、验证结果、复用建议。
+    - **文件**: `/home/hz/.codex/skills/troubleshooting-kb/references/case_template.md`
+      - 模板改为最小可用结构，只保留关键字段。
+- **Execution Record**:
+```bash
+# 更新 Skill 与模板
+# /home/hz/.codex/skills/troubleshooting-kb/SKILL.md
+# /home/hz/.codex/skills/troubleshooting-kb/references/case_template.md
 ```

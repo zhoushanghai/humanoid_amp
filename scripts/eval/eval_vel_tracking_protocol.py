@@ -1,6 +1,6 @@
 """
 文件用途: 按 Velocity Tracking 协议执行全量评测并导出汇总/明细结果。
-主要内容: 配置读取、命令阶段调度(ramp/settle/record)、指标计算、CSV/JSON 导出与结果图表生成。
+主要内容: 配置读取、命令阶段调度(ramp/settle/record)、视频分段录制(含重置起始对齐段)、指标计算、CSV/JSON 导出与结果图表生成。
 """
 
 from __future__ import annotations
@@ -47,13 +47,13 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import gymnasium as gym
+import imageio.v2 as imageio
 import matplotlib.pyplot as plt
 import skrl
 import torch
 from packaging import version
 
 from isaaclab.envs import DirectMARLEnv, DirectMARLEnvCfg, DirectRLEnvCfg, ManagerBasedRLEnvCfg, multi_agent_to_single_agent
-from isaaclab.utils.dict import print_dict
 from isaaclab.utils.math import quat_apply_inverse
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -143,6 +143,13 @@ record_s = float(cfg_file.get("record_s", 10.0))
 max_vx_pass_err = float(cfg_file.get("max_vx_pass_err", 0.5))
 max_vy_pass_err = float(cfg_file.get("max_vy_pass_err", 0.3))
 fixed_speed_from_start = bool(cfg_file.get("fixed_speed_from_start", True))
+reset_between_combos = bool(cfg_file.get("reset_between_combos", True))
+eval_reset_strategy = str(cfg_file.get("eval_reset_strategy", "default"))
+reset_sync_steps = int(cfg_file.get("reset_sync_steps", 2))
+video_camera_zoom_out = float(cfg_file.get("video_camera_zoom_out", 1.25))
+video_camera_lift_z = float(cfg_file.get("video_camera_lift_z", 0.2))
+video_render_flush_frames = int(cfg_file.get("video_render_flush_frames", 8))
+video_reset_lead_in_s = float(cfg_file.get("video_reset_lead_in_s", 0.5))
 
 agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm_name.lower() == "ppo" else f"skrl_{algorithm_name.lower()}_cfg_entry_point"
 
@@ -187,14 +194,18 @@ def _current_actual_speeds(unwrapped_env) -> tuple[torch.Tensor, torch.Tensor]:
     return lin_xy, yaw_z
 
 
-def _run_steps(env, runner: Runner, obs: dict, num_steps: int, on_step=None):
+def _run_steps(env, runner: Runner, obs: dict, num_steps: int, on_step=None, on_frame=None):
     for _ in range(num_steps):
-        with torch.inference_mode():
+        # Do not run env.step under inference_mode: it can create inference tensors
+        # inside simulator buffers and break subsequent reset() inplace updates.
+        with torch.no_grad():
             actions = _get_policy_actions(runner, obs, env)
-            obs, _, terminated, truncated, _ = env.step(actions)
+        obs, _, terminated, truncated, _ = env.step(actions)
         done_mask = _extract_done_mask(terminated, truncated)
         if on_step is not None:
             on_step(done_mask)
+        if on_frame is not None:
+            on_frame()
     return obs
 
 
@@ -260,15 +271,90 @@ def _safe_std(values: list[float]) -> float:
     return float(math.sqrt(var))
 
 
+class PerComboVideoRecorder:
+    def __init__(self, enabled: bool, render_env, video_dir: Path, render_flush_frames: int = 0):
+        self.enabled = enabled
+        self.render_env = render_env
+        self.video_dir = video_dir
+        self.render_flush_frames = max(0, int(render_flush_frames))
+        self.writer = None
+        if self.enabled:
+            self.video_dir.mkdir(parents=True, exist_ok=True)
+
+    def _sanitize_name(self, name: str) -> str:
+        safe = []
+        for c in name:
+            if c.isalnum() or c in ("-", "_", "."):
+                safe.append(c)
+            else:
+                safe.append("_")
+        return "".join(safe)
+
+    def start(self, item_name: str):
+        if not self.enabled:
+            return
+        self.close()
+        # Isaac rendering can be one/few frames behind after reset; drop stale frames before opening a new file.
+        for _ in range(self.render_flush_frames):
+            try:
+                self.render_env.render()
+            except Exception:
+                break
+        out = self.video_dir / f"{self._sanitize_name(item_name)}.mp4"
+        self.writer = imageio.get_writer(str(out), fps=60)
+
+    def capture(self):
+        if not self.enabled or self.writer is None:
+            return
+        frame = self.render_env.render()
+        if frame is not None:
+            self.writer.append_data(frame)
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+
+
+def _record_video_reset_lead_in(
+    env,
+    runner: Runner,
+    obs: dict,
+    unwrapped_env,
+    step_dt: float,
+    video_recorder: PerComboVideoRecorder | None,
+    lead_in_s: float,
+):
+    """Record a short zero-command pre-roll so each video starts from reset formation."""
+    if video_recorder is None:
+        return obs
+    lead_in_s = max(0.0, float(lead_in_s))
+    lead_steps = _steps_from_seconds(lead_in_s, step_dt) if lead_in_s > 0.0 else 0
+    _set_command(unwrapped_env, torch.zeros((num_envs, int(unwrapped_env.command_dim)), device=unwrapped_env.device))
+    video_recorder.capture()
+    if lead_steps > 0:
+        obs = _run_steps(env, runner, obs, lead_steps, on_frame=video_recorder.capture)
+    return obs
+
+
 def _evaluate_combo(
     env,
+    render_env,
     unwrapped_env,
     runner: Runner,
     obs: dict,
     combo: Combo,
     step_dt: float,
     use_fixed_speed_from_start: bool,
+    video_recorder: PerComboVideoRecorder | None,
+    reset_before_start: bool,
+    reset_sync_steps_local: int,
+    video_reset_lead_in_s_local: float,
 ) -> tuple[dict, dict]:
+    if reset_before_start:
+        # Reset first and run at least one sync step so the first captured frame is from the new test.
+        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(1, int(reset_sync_steps_local)))
+
     n_env = int(unwrapped_env.num_envs)
     command_dim = int(unwrapped_env.command_dim)
     goal = torch.zeros((n_env, command_dim), device=unwrapped_env.device, dtype=torch.float32)
@@ -283,23 +369,56 @@ def _evaluate_combo(
         nonlocal survived
         survived = torch.logical_and(survived, ~done_mask.to(unwrapped_env.device))
 
+    if video_recorder is not None:
+        video_recorder.start(combo.combo_id)
+        obs = _record_video_reset_lead_in(
+            env,
+            runner,
+            obs,
+            unwrapped_env,
+            step_dt,
+            video_recorder,
+            video_reset_lead_in_s_local,
+        )
+
     if use_fixed_speed_from_start:
         _set_command(unwrapped_env, goal)
     else:
         ramp_steps = _steps_from_seconds(ramp_dur, step_dt)
         for ramp_target in _ramp_targets(goal, ramp_inc):
             _set_command(unwrapped_env, ramp_target)
-            obs = _run_steps(env, runner, obs, ramp_steps, on_step=update_survival)
+            obs = _run_steps(
+                env,
+                runner,
+                obs,
+                ramp_steps,
+                on_step=update_survival,
+                on_frame=(video_recorder.capture if video_recorder is not None else None),
+            )
 
     _set_command(unwrapped_env, goal)
-    obs = _run_steps(env, runner, obs, _steps_from_seconds(settle_s, step_dt), on_step=update_survival)
+    obs = _run_steps(
+        env,
+        runner,
+        obs,
+        _steps_from_seconds(settle_s, step_dt),
+        on_step=update_survival,
+        on_frame=(video_recorder.capture if video_recorder is not None else None),
+    )
 
     record_steps = _steps_from_seconds(record_s, step_dt)
     err_lin_sum = torch.zeros((n_env,), device=unwrapped_env.device, dtype=torch.float32)
     err_yaw_sum = torch.zeros((n_env,), device=unwrapped_env.device, dtype=torch.float32)
+    # record-window survival time (seconds), only counting record window
+    record_survival_s = torch.zeros((n_env,), device=unwrapped_env.device, dtype=torch.float32)
+    alive_in_record = survived.clone()
+    record_started_alive = survived.clone()
 
     def collect_errors(done_mask: torch.Tensor):
-        nonlocal survived, err_lin_sum, err_yaw_sum
+        nonlocal survived, err_lin_sum, err_yaw_sum, record_survival_s, alive_in_record
+        alive_before_step = alive_in_record.clone()
+        record_survival_s += alive_before_step.float() * float(step_dt)
+        alive_in_record = torch.logical_and(alive_in_record, ~done_mask.to(unwrapped_env.device))
         survived = torch.logical_and(survived, ~done_mask.to(unwrapped_env.device))
         cmd = _current_cmd_tensor(unwrapped_env)
         act_lin_xy, act_yaw = _current_actual_speeds(unwrapped_env)
@@ -308,13 +427,28 @@ def _evaluate_combo(
         err_lin_sum += err_lin
         err_yaw_sum += err_yaw
 
-    obs = _run_steps(env, runner, obs, record_steps, on_step=collect_errors)
+    obs = _run_steps(
+        env,
+        runner,
+        obs,
+        record_steps,
+        on_step=collect_errors,
+        on_frame=(video_recorder.capture if video_recorder is not None else None),
+    )
 
     err_lin_bar = err_lin_sum / float(record_steps)
     err_yaw_bar = err_yaw_sum / float(record_steps)
     cmd = _current_cmd_tensor(unwrapped_env)
     acc_lin = _acc_from_errors_lin(err_lin_bar, cmd[:, :2])
     acc_yaw = _acc_from_errors_yaw(err_yaw_bar, cmd[:, 2]) if command_dim == 3 else torch.zeros_like(err_lin_bar)
+    survived_full_record = torch.logical_and(record_started_alive, alive_in_record)
+
+    # Per-env tracking accuracy for this combo:
+    # - yaw groups use yaw accuracy
+    # - all other groups use linear accuracy
+    combo_is_yaw = combo.group.startswith("yaw")
+    tracking_acc = acc_yaw.clone() if combo_is_yaw else acc_lin.clone()
+    tracking_acc[~survived_full_record] = torch.nan
 
     survived_cpu = survived.detach().cpu()
     valid = int(survived_cpu.sum().item()) > 0
@@ -340,11 +474,32 @@ def _evaluate_combo(
         "err_yaw_bar": err_yaw_bar.detach().cpu(),
         "acc_lin": acc_lin.detach().cpu(),
         "acc_yaw": acc_yaw.detach().cpu(),
+        "record_survival_s": record_survival_s.detach().cpu(),
+        "tracking_acc": tracking_acc.detach().cpu(),
+        "tracking_metric": ("yaw_acc" if combo_is_yaw else "lin_acc"),
+        "survived_full_record": survived_full_record.detach().cpu(),
     }
+    if video_recorder is not None:
+        video_recorder.close()
     return detail, per_env, obs
 
 
-def _evaluate_step_survival(env, unwrapped_env, runner: Runner, obs: dict, step_dt: float) -> tuple[float, dict]:
+def _evaluate_step_survival(
+    env,
+    render_env,
+    unwrapped_env,
+    runner: Runner,
+    obs: dict,
+    step_dt: float,
+    video_recorder: PerComboVideoRecorder | None,
+    reset_before_start: bool,
+    reset_sync_steps_local: int,
+    video_reset_lead_in_s_local: float,
+) -> tuple[float, dict]:
+    if reset_before_start:
+        # Keep step-survival as one sequence, but ensure it starts from a clean reset state.
+        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(1, int(reset_sync_steps_local)))
+
     n_env = int(unwrapped_env.num_envs)
     command_dim = int(unwrapped_env.command_dim)
     survived = torch.ones((n_env,), device=unwrapped_env.device, dtype=torch.bool)
@@ -357,6 +512,17 @@ def _evaluate_step_survival(env, unwrapped_env, runner: Runner, obs: dict, step_
     ]
 
     for phase_idx, (cmd_tuple, dur_s) in enumerate(sequence, start=1):
+        if video_recorder is not None:
+            video_recorder.start(f"step_phase_{phase_idx}_{cmd_tuple[0]}_{cmd_tuple[1]}_{cmd_tuple[2]}")
+            obs = _record_video_reset_lead_in(
+                env,
+                runner,
+                obs,
+                unwrapped_env,
+                step_dt,
+                video_recorder,
+                video_reset_lead_in_s_local,
+            )
         target = torch.zeros((n_env, command_dim), device=unwrapped_env.device, dtype=torch.float32)
         target[:, 0] = cmd_tuple[0]
         target[:, 1] = cmd_tuple[1]
@@ -382,7 +548,14 @@ def _evaluate_step_survival(env, unwrapped_env, runner: Runner, obs: dict, step_
                 err_lin_tail.pop(0)
                 err_yaw_tail.pop(0)
 
-        obs = _run_steps(env, runner, obs, steps, on_step=on_step)
+        obs = _run_steps(
+            env,
+            runner,
+            obs,
+            steps,
+            on_step=on_step,
+            on_frame=(video_recorder.capture if video_recorder is not None else None),
+        )
         alive_rate = float(survived.float().mean().item())
         lin_tail = torch.stack(err_lin_tail).mean(dim=0) if err_lin_tail else torch.zeros((n_env,))
         yaw_tail = torch.stack(err_yaw_tail).mean(dim=0) if err_yaw_tail else torch.zeros((n_env,))
@@ -398,6 +571,8 @@ def _evaluate_step_survival(env, unwrapped_env, runner: Runner, obs: dict, step_
                 "tail5_yaw_err_mean": float(yaw_tail.mean().item()),
             }
         )
+        if video_recorder is not None:
+            video_recorder.close()
 
     return float(survived.float().mean().item()), {"step_phase_logs": phase_logs}, obs
 
@@ -512,11 +687,115 @@ def _plot_step_alive(step_phase_logs: list[dict], out_dir: Path) -> None:
     plt.close(fig)
 
 
+def _build_group_colors(details: list[dict]) -> dict[str, str]:
+    # Use only two shades as requested: dark blue / light blue (alternating by group order)
+    shades = ["#0b3c6d", "#5fa8ff"]
+    groups = []
+    for d in details:
+        g = d["group"]
+        if g not in groups:
+            groups.append(g)
+    return {g: shades[i % 2] for i, g in enumerate(groups)}
+
+
+def _plot_global_record_survival(per_env_rows: list[dict], details: list[dict], out_dir: Path) -> None:
+    combo_order = [d["combo_id"] for d in details]
+    combo_to_group = {d["combo_id"]: d["group"] for d in details}
+    group_colors = _build_group_colors(details)
+
+    data = []
+    labels = []
+    colors = []
+    for combo_id in combo_order:
+        vals = [float(r["record_survival_s"]) for r in per_env_rows if r["combo_id"] == combo_id]
+        if not vals:
+            continue
+        data.append(vals)
+        labels.append(combo_id)
+        colors.append(group_colors[combo_to_group[combo_id]])
+
+    if not data:
+        return
+
+    fig, ax = plt.subplots(figsize=(18, 7))
+    bplot = ax.boxplot(data, patch_artist=True, showfliers=False)
+    for patch, color in zip(bplot["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.75)
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels, rotation=90, fontsize=7)
+    ax.set_ylabel("Record-window Survival Time (s)")
+    ax.set_title("Global Summary: Record-window Survival Time per Combo (Per-env)")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_dir / "global_record_survival_boxplot.png", dpi=180)
+    plt.close(fig)
+
+
+def _plot_global_tracking_acc(per_env_rows: list[dict], details: list[dict], out_dir: Path) -> None:
+    combo_order = [d["combo_id"] for d in details]
+    combo_to_group = {d["combo_id"]: d["group"] for d in details}
+    group_colors = _build_group_colors(details)
+
+    data = []
+    labels = []
+    colors = []
+    for combo_id in combo_order:
+        vals = []
+        for r in per_env_rows:
+            if r["combo_id"] != combo_id:
+                continue
+            v = r["tracking_acc"]
+            if isinstance(v, float) and math.isnan(v):
+                continue
+            vals.append(float(v))
+        if not vals:
+            continue
+        data.append(vals)
+        labels.append(combo_id)
+        colors.append(group_colors[combo_to_group[combo_id]])
+
+    if not data:
+        return
+
+    fig, ax = plt.subplots(figsize=(18, 7))
+    bplot = ax.boxplot(data, patch_artist=True, showfliers=False)
+    for patch, color in zip(bplot["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.75)
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels, rotation=90, fontsize=7)
+    ax.set_ylabel("Tracking Accuracy (%)")
+    ax.set_title("Global Summary: Tracking Accuracy per Combo (Per-env)")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_dir / "global_tracking_acc_boxplot.png", dpi=180)
+    plt.close(fig)
+
+
+def _reset_env_for_new_test(env, unwrapped_env, runner: Runner, sync_steps: int):
+    # skrl IsaacLabWrapper caches reset and only performs a real reset once.
+    # Force it to execute a full underlying env reset for every test item.
+    if hasattr(env, "_reset_once"):
+        try:
+            env._reset_once = True
+        except Exception:
+            pass
+    obs, _ = env.reset()
+    _set_command(unwrapped_env, torch.zeros((num_envs, int(unwrapped_env.command_dim)), device=unwrapped_env.device))
+    if sync_steps > 0:
+        obs = _run_steps(env, runner, obs, sync_steps)
+    return obs
+
+
 @hydra_task_config(task_name, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, experiment_cfg: dict):
     env_cfg.scene.num_envs = num_envs
     if device_name is not None:
         env_cfg.sim.device = device_name
+    # For evaluation consistency: start each combo from a canonical formation.
+    if hasattr(env_cfg, "reset_strategy"):
+        env_cfg.reset_strategy = eval_reset_strategy
 
     if seed_value == -1:
         random.seed(int(time.time()))
@@ -532,7 +811,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     run_dir = os.path.dirname(os.path.dirname(ckpt_abs))
     env_cfg.log_dir = run_dir
 
-    env = gym.make(task_name, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    # Video-only camera adjustment: slightly zoom out and lift camera to enlarge visible area.
+    if args_cli.video and hasattr(env_cfg, "viewer"):
+        try:
+            eye = list(env_cfg.viewer.eye)
+            lookat = list(env_cfg.viewer.lookat)
+            if len(eye) == 3 and len(lookat) == 3:
+                for i in range(3):
+                    eye[i] = lookat[i] + (eye[i] - lookat[i]) * video_camera_zoom_out
+                eye[2] += video_camera_lift_z
+                env_cfg.viewer.eye = tuple(eye)
+                env_cfg.viewer.lookat = tuple(lookat)
+        except Exception:
+            pass
+
+    raw_env = gym.make(task_name, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = raw_env
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm_name.lower() in ["ppo"]:
         env = multi_agent_to_single_agent(env)
 
@@ -542,17 +836,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         raise RuntimeError("Env does not support fixed command targets.")
     if int(getattr(unwrapped_env, "command_dim", 0)) != 3:
         raise RuntimeError(f"This evaluator expects command_dim=3, got {getattr(unwrapped_env, 'command_dim', None)}")
-
-    if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(run_dir, "videos", "eval_vel_tracking"),
-            "step_trigger": lambda step: step == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording evaluation video.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     env = SkrlVecEnvWrapper(env, ml_framework=ml_framework)
     experiment_cfg["trainer"]["close_environment_at_exit"] = False
@@ -581,10 +864,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     runner.agent.set_running_mode("eval")
 
     obs, _ = env.reset()
-    _set_command(unwrapped_env, torch.zeros((num_envs, int(unwrapped_env.command_dim)), device=unwrapped_env.device))
-    obs = _run_steps(env, runner, obs, _steps_from_seconds(1.0, step_dt))
+
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    ckpt_name = os.path.splitext(os.path.basename(ckpt_abs))[0]
+    out_dir = output_root / f"{ckpt_name}_{ts}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    video_recorder = PerComboVideoRecorder(
+        args_cli.video,
+        raw_env,
+        out_dir / "videos",
+        render_flush_frames=video_render_flush_frames,
+    )
 
     details: list[dict] = []
+    per_env_rows: list[dict] = []
     group_lin_scores: dict[str, list[float]] = {"low_lin": [], "high_lin": []}
     group_yaw_scores: dict[str, list[float]] = {"yaw_low": [], "yaw_high": []}
 
@@ -592,14 +885,31 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     for combo in combos:
         detail, per_env, obs = _evaluate_combo(
             env,
+            raw_env,
             unwrapped_env,
             runner,
             obs,
             combo,
             step_dt,
             use_fixed_speed_from_start=fixed_speed_from_start,
+            video_recorder=video_recorder,
+            reset_before_start=reset_between_combos,
+            reset_sync_steps_local=reset_sync_steps,
+            video_reset_lead_in_s_local=video_reset_lead_in_s,
         )
         details.append(detail)
+        for env_id in range(int(num_envs)):
+            per_env_rows.append(
+                {
+                    "group": combo.group,
+                    "combo_id": combo.combo_id,
+                    "env_id": env_id,
+                    "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
+                    "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_metric": per_env["tracking_metric"],
+                    "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                }
+            )
         if detail["valid_combo"]:
             if combo.group in group_lin_scores:
                 group_lin_scores[combo.group].append(detail["lin_acc_mean"])
@@ -615,14 +925,31 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         combo = Combo("max_vx_scan", f"max_vx_{spd:.2f}", spd, 0.0, 0.0)
         detail, per_env, obs = _evaluate_combo(
             env,
+            raw_env,
             unwrapped_env,
             runner,
             obs,
             combo,
             step_dt,
             use_fixed_speed_from_start=fixed_speed_from_start,
+            video_recorder=video_recorder,
+            reset_before_start=reset_between_combos,
+            reset_sync_steps_local=reset_sync_steps,
+            video_reset_lead_in_s_local=video_reset_lead_in_s,
         )
         details.append(detail)
+        for env_id in range(int(num_envs)):
+            per_env_rows.append(
+                {
+                    "group": combo.group,
+                    "combo_id": combo.combo_id,
+                    "env_id": env_id,
+                    "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
+                    "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_metric": per_env["tracking_metric"],
+                    "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                }
+            )
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vx_pass_err)
         max_vx_per_env[pass_mask] = float(spd)
 
@@ -630,18 +957,46 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         combo = Combo("max_vy_scan", f"max_vy_{spd:.2f}", 0.0, spd, 0.0)
         detail, per_env, obs = _evaluate_combo(
             env,
+            raw_env,
             unwrapped_env,
             runner,
             obs,
             combo,
             step_dt,
             use_fixed_speed_from_start=fixed_speed_from_start,
+            video_recorder=video_recorder,
+            reset_before_start=reset_between_combos,
+            reset_sync_steps_local=reset_sync_steps,
+            video_reset_lead_in_s_local=video_reset_lead_in_s,
         )
         details.append(detail)
+        for env_id in range(int(num_envs)):
+            per_env_rows.append(
+                {
+                    "group": combo.group,
+                    "combo_id": combo.combo_id,
+                    "env_id": env_id,
+                    "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
+                    "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_metric": per_env["tracking_metric"],
+                    "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                }
+            )
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vy_pass_err)
         max_vy_per_env[pass_mask] = float(spd)
 
-    step_survival, step_diag, obs = _evaluate_step_survival(env, unwrapped_env, runner, obs, step_dt)
+    step_survival, step_diag, obs = _evaluate_step_survival(
+        env,
+        raw_env,
+        unwrapped_env,
+        runner,
+        obs,
+        step_dt,
+        video_recorder=video_recorder,
+        reset_before_start=reset_between_combos,
+        reset_sync_steps_local=reset_sync_steps,
+        video_reset_lead_in_s_local=video_reset_lead_in_s,
+    )
 
     summary = {
         "low_lin_lin_acc": _safe_mean(group_lin_scores["low_lin"]),
@@ -658,11 +1013,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         "max_vy_std": float(max_vy_per_env.std(unbiased=False).item()),
         "step_survival": float(step_survival),
     }
-
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    ckpt_name = os.path.splitext(os.path.basename(ckpt_abs))[0]
-    out_dir = output_root / f"{ckpt_name}_{ts}"
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     summary_fields = [
         "low_lin_lin_acc",
@@ -696,6 +1046,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         "yaw_acc_mean",
     ]
     _write_csv(out_dir / "metrics_combo_details.csv", details, detail_fields)
+    _write_csv(
+        out_dir / "metrics_per_env_details.csv",
+        per_env_rows,
+        ["group", "combo_id", "env_id", "record_survival_s", "tracking_acc", "tracking_metric", "survived_full_record"],
+    )
 
     with open(out_dir / "run_meta.json", "w", encoding="utf-8") as f:
         json.dump(
@@ -716,7 +1071,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                 "max_vx_pass_err": max_vx_pass_err,
                 "max_vy_pass_err": max_vy_pass_err,
                 "fixed_speed_from_start": fixed_speed_from_start,
+                "reset_between_combos": reset_between_combos,
+                "eval_reset_strategy": eval_reset_strategy,
+                "reset_sync_steps": reset_sync_steps,
+                "video_reset_lead_in_s": video_reset_lead_in_s,
                 "summary": summary,
+                "video_dir": str((out_dir / "videos").resolve()) if args_cli.video else None,
                 **step_diag,
             },
             f,
@@ -728,8 +1088,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     _plot_combo_lin_acc(details, out_dir)
     _plot_summary_metrics(summary, out_dir)
     _plot_step_alive(step_diag.get("step_phase_logs", []), out_dir)
+    _plot_global_record_survival(per_env_rows, details, out_dir)
+    _plot_global_tracking_acc(per_env_rows, details, out_dir)
 
     print(f"[DONE] Velocity tracking evaluation complete.\n[OUT] {out_dir}")
+    video_recorder.close()
     env.close()
 
 

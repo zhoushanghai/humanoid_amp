@@ -23,3 +23,25 @@ max_vy_pass_err: 0.3
 # True: 每个测试点从第一步就使用目标速度（不做 ramp）
 # False: 使用文档中的 ramp -> settle -> record
 fixed_speed_from_start: true
+
+# True: 每个测试项开始前执行 env.reset()（机器人状态归零），但不重建仿真环境
+reset_between_combos: true
+
+# 评测时的重置策略：
+# - default: 统一初始姿态（方队）
+# - random / random-start: 随机重置
+eval_reset_strategy: default
+
+# 每次 reset 后用于渲染/状态同步的非统计步数（避免视频开头残留上一段动作）
+reset_sync_steps: 2
+
+# 每个视频片段开始前，额外丢弃若干渲染帧以清空渲染缓存（避免首帧串到上一测试）
+video_render_flush_frames: 8
+
+# 每个视频片段开始时先录制一段 reset 后零命令前导（秒），保证开头可见方阵重置
+video_reset_lead_in_s: 0.5
+
+# 仅视频录制时的视角微调（避免画面太近）
+# 最终相机 = lookat + (eye-lookat) * zoom_out，再额外抬高 z 轴
+video_camera_zoom_out: 2.3
+video_camera_lift_z: 0.3
