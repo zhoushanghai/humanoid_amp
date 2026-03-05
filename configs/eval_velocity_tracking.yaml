@@ -1,5 +1,5 @@
 # 文件用途: Velocity Tracking 全量评测统一配置（checkpoint 单点维护）
-# 主要内容: active_checkpoint, task, num_envs, seed, device, output_dir, 评测窗口参数
+# 主要内容: active_checkpoint, task, num_envs, seed, device, output_dir, 评测窗口参数, max_vx/max_vy 扫描列表
 
 active_checkpoint: logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/checkpoints/agent_5555000.pt
 
@@ -14,11 +14,20 @@ output_dir: outputs/vel_tracking
 
 ramp_inc: 0.2
 ramp_dur: 0.5
-settle_s: 2.0
+settle_s: 3.0
 record_s: 10.0
 
 max_vx_pass_err: 0.5
 max_vy_pass_err: 0.3
+
+# 最大速度扫描列表（用于汇总 max_vx / max_vy）
+# 从低速开始扫描可避免“全失败时 max_vx=0.0 但真实上限未知”的歧义
+max_vx_scan_values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
+max_vy_scan_values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+
+# 有效样本定义中的线速度误差阈值（m/s）：
+# 仅当“record窗口存活”且“线速度跟踪误差<=该阈值”时，才计入有效统计
+valid_tracking_error_mps: 0.5
 
 # True: 每个测试点从第一步就使用目标速度（不做 ramp）
 # False: 使用文档中的 ramp -> settle -> record
@@ -33,13 +42,13 @@ reset_between_combos: true
 eval_reset_strategy: default
 
 # 每次 reset 后用于渲染/状态同步的非统计步数（避免视频开头残留上一段动作）
-reset_sync_steps: 2
+reset_sync_steps: 0
 
 # 每个视频片段开始前，额外丢弃若干渲染帧以清空渲染缓存（避免首帧串到上一测试）
 video_render_flush_frames: 8
 
-# 每个视频片段开始时先录制一段 reset 后零命令前导（秒），保证开头可见方阵重置
-video_reset_lead_in_s: 0.5
+# 每个视频片段开始时先录制一段前导（秒），用于视频对齐（不计入统计）
+video_reset_lead_in_s: 0.0
 
 # 仅视频录制时的视角微调（避免画面太近）
 # 最终相机 = lookat + (eye-lookat) * zoom_out，再额外抬高 z 轴

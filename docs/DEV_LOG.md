@@ -1128,3 +1128,109 @@ mkdir -p /home/hz/.codex/skills/troubleshooting-kb/references
 # /home/hz/.codex/skills/troubleshooting-kb/SKILL.md
 # /home/hz/.codex/skills/troubleshooting-kb/references/case_template.md
 ```
+
+## Evaluation Startup Lead-in Update
+
+- **Date**: 2026-03-05
+- **Action**: 将评测视频每段的初始启动前导时间调整为 3 秒。
+- **Details**:
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+    - 参数变更:
+      - `video_reset_lead_in_s: 0.5 -> 3.0`
+    - 影响:
+      - 每个测试项视频在真正下发命令前，会先录制 3 秒 reset 后方阵状态。
+      - 该前导仅用于视频对齐，不参与指标统计。
+- **Execution Record**:
+```bash
+python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless \
+  --video \
+  --video_length 1200
+```
+
+## Evaluation Valid-Data Definition Update
+
+- **Date**: 2026-03-05
+- **Action**: 将“有效数据”定义更新为“双条件”：record 窗口存活 + 跟踪误差不超过 5%。
+- **Details**:
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `valid_tracking_error_pct: 5.0`。
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - `valid_combo` 与组内均值统计改为基于 `valid_sample_mask`（不再仅按 survived）。
+      - `valid_sample_mask` 定义：`survived_full_record` 且 `tracking_err_pct <= valid_tracking_error_pct`。
+      - `metrics_combo_details.csv` 新增 `n_valid`。
+      - `metrics_per_env_details.csv` 新增：
+        - `tracking_err_pct`
+        - `valid_sample`
+      - `combo_survival.png` 改为展示有效样本计数（Valid Envs）。
+      - `run_meta.json` 新增 `valid_tracking_error_pct` 记录。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Window Semantics Update (Immediate Command + 3s Warmup)
+
+- **Date**: 2026-03-05
+- **Action**: 调整评测语义为“reset 后立即下发目标命令，3 秒后开始 10 秒统计窗口”。
+- **Details**:
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - `settle_s: 2.0 -> 3.0`（统计前热身 3 秒）
+      - `record_s: 10.0`（统计窗口 10 秒，保持不变）
+      - `reset_sync_steps: 2 -> 0`（避免 reset 后额外无命令同步步）
+      - `video_reset_lead_in_s: 3.0 -> 0.0`（去除额外视频前导等待）
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - fixed-speed 模式下，在 reset 后立即 `_set_command(goal)`，再进入 warmup/record。
+      - `_reset_env_for_new_test(...)` 调用处允许 `reset_sync_steps=0`（不再强制至少 1 步）。
+      - 视频前导 `_record_video_reset_lead_in(...)` 改为“当前命令下的对齐段”，不再强制置零命令。
+      - `step_survival` 中将目标命令下发提前到视频前导之前，保证阶段开始即为目标命令。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Valid-Data Threshold Unit Update
+
+- **Date**: 2026-03-05
+- **Action**: 将有效数据阈值从百分比改为线速度绝对误差阈值（m/s）。
+- **Details**:
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - `valid_tracking_error_pct` 改为 `valid_tracking_error_mps: 0.5`。
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 有效样本判定改为：`survived_full_record && err_lin_bar <= valid_tracking_error_mps`。
+      - 每环境输出字段由 `tracking_err_pct` 改为 `tracking_err_mps`。
+      - `run_meta.json` 中记录键改为 `valid_tracking_error_mps`。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Max-V Scan Start-from-0.5 Update
+
+- **Date**: 2026-03-05
+- **Action**: 将 max_vx / max_vy 扫描列表改为可配置，并把扫描起点下探到 0.5 m/s。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增 `_cfg_float_list(...)`，支持从配置读取 `max_vx_scan_values` / `max_vy_scan_values`。
+      - `max_vx`/`max_vy` 扫描循环不再硬编码，改为读取配置列表。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增：
+        - `max_vx_scan_values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]`
+        - `max_vy_scan_values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]`
+    - 运行状态:
+      - 直接运行因环境缺少 `isaaclab` 失败。
+      - `conda run -n g1_amp` 运行触发沙箱共享内存权限限制（NamedSemaphore Permission denied）。
+      - 已发起提权运行请求，但当前会话未获批准，故本轮未产出新的评测目录。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+
+python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml
+
+conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml
+```
+
+- **[2026-03-05]** `git commit`: feat(eval): 支持0.5起扫速 / support 0.5-start speed scan

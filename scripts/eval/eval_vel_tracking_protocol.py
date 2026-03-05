@@ -1,6 +1,6 @@
 """
 文件用途: 按 Velocity Tracking 协议执行全量评测并导出汇总/明细结果。
-主要内容: 配置读取、命令阶段调度(ramp/settle/record)、视频分段录制(含重置起始对齐段)、指标计算、CSV/JSON 导出与结果图表生成。
+主要内容: 配置读取（含 max_vx/max_vy 扫描列表）、命令阶段调度(ramp/settle/record)、视频分段录制(含重置起始对齐段)、指标计算、CSV/JSON 导出与结果图表生成。
 """
 
 from __future__ import annotations
@@ -142,6 +142,9 @@ settle_s = float(cfg_file.get("settle_s", 2.0))
 record_s = float(cfg_file.get("record_s", 10.0))
 max_vx_pass_err = float(cfg_file.get("max_vx_pass_err", 0.5))
 max_vy_pass_err = float(cfg_file.get("max_vy_pass_err", 0.3))
+# valid sample definition for aggregation:
+# survived in record window + linear tracking error (m/s) <= this threshold.
+valid_tracking_error_mps = float(cfg_file.get("valid_tracking_error_mps", 0.5))
 fixed_speed_from_start = bool(cfg_file.get("fixed_speed_from_start", True))
 reset_between_combos = bool(cfg_file.get("reset_between_combos", True))
 eval_reset_strategy = str(cfg_file.get("eval_reset_strategy", "default"))
@@ -152,6 +155,27 @@ video_render_flush_frames = int(cfg_file.get("video_render_flush_frames", 8))
 video_reset_lead_in_s = float(cfg_file.get("video_reset_lead_in_s", 0.5))
 
 agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm_name.lower() == "ppo" else f"skrl_{algorithm_name.lower()}_cfg_entry_point"
+
+
+def _cfg_float_list(raw_value, default: list[float]) -> list[float]:
+    """Parse scan values from config, accepting list/tuple or comma-separated string."""
+    if raw_value is None:
+        return list(default)
+    if isinstance(raw_value, (list, tuple)):
+        vals = [float(v) for v in raw_value]
+        return vals if vals else list(default)
+    if isinstance(raw_value, str):
+        txt = raw_value.strip()
+        if not txt:
+            return list(default)
+        vals = []
+        for seg in txt.split(","):
+            s = seg.strip()
+            if not s:
+                continue
+            vals.append(float(s))
+        return vals if vals else list(default)
+    return list(default)
 
 
 def _steps_from_seconds(seconds: float, step_dt: float) -> int:
@@ -325,12 +349,11 @@ def _record_video_reset_lead_in(
     video_recorder: PerComboVideoRecorder | None,
     lead_in_s: float,
 ):
-    """Record a short zero-command pre-roll so each video starts from reset formation."""
+    """Record a short pre-roll for video alignment under the current command."""
     if video_recorder is None:
         return obs
     lead_in_s = max(0.0, float(lead_in_s))
     lead_steps = _steps_from_seconds(lead_in_s, step_dt) if lead_in_s > 0.0 else 0
-    _set_command(unwrapped_env, torch.zeros((num_envs, int(unwrapped_env.command_dim)), device=unwrapped_env.device))
     video_recorder.capture()
     if lead_steps > 0:
         obs = _run_steps(env, runner, obs, lead_steps, on_frame=video_recorder.capture)
@@ -353,7 +376,7 @@ def _evaluate_combo(
 ) -> tuple[dict, dict]:
     if reset_before_start:
         # Reset first and run at least one sync step so the first captured frame is from the new test.
-        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(1, int(reset_sync_steps_local)))
+        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(0, int(reset_sync_steps_local)))
 
     n_env = int(unwrapped_env.num_envs)
     command_dim = int(unwrapped_env.command_dim)
@@ -369,6 +392,10 @@ def _evaluate_combo(
         nonlocal survived
         survived = torch.logical_and(survived, ~done_mask.to(unwrapped_env.device))
 
+    # For fixed-speed evaluation, issue target command immediately after reset.
+    if use_fixed_speed_from_start:
+        _set_command(unwrapped_env, goal)
+
     if video_recorder is not None:
         video_recorder.start(combo.combo_id)
         obs = _record_video_reset_lead_in(
@@ -381,9 +408,7 @@ def _evaluate_combo(
             video_reset_lead_in_s_local,
         )
 
-    if use_fixed_speed_from_start:
-        _set_command(unwrapped_env, goal)
-    else:
+    if not use_fixed_speed_from_start:
         ramp_steps = _steps_from_seconds(ramp_dur, step_dt)
         for ramp_target in _ramp_targets(goal, ramp_inc):
             _set_command(unwrapped_env, ramp_target)
@@ -447,11 +472,17 @@ def _evaluate_combo(
     # - yaw groups use yaw accuracy
     # - all other groups use linear accuracy
     combo_is_yaw = combo.group.startswith("yaw")
-    tracking_acc = acc_yaw.clone() if combo_is_yaw else acc_lin.clone()
-    tracking_acc[~survived_full_record] = torch.nan
+    tracking_acc_raw = acc_yaw.clone() if combo_is_yaw else acc_lin.clone()
+    tracking_err_mps = err_lin_bar.clone()
+    valid_sample_mask = survived_full_record & (tracking_err_mps <= float(valid_tracking_error_mps))
+    tracking_acc = tracking_acc_raw.clone()
+    tracking_acc[~valid_sample_mask] = torch.nan
+    tracking_err_mps = tracking_err_mps.clone()
+    tracking_err_mps[~survived_full_record] = torch.nan
 
     survived_cpu = survived.detach().cpu()
-    valid = int(survived_cpu.sum().item()) > 0
+    valid_sample_cpu = valid_sample_mask.detach().cpu()
+    valid = int(valid_sample_cpu.sum().item()) > 0
 
     detail = {
         "group": combo.group,
@@ -461,11 +492,12 @@ def _evaluate_combo(
         "cmd_wz": combo.wz,
         "n_env": n_env,
         "n_survived": int(survived_cpu.sum().item()),
+        "n_valid": int(valid_sample_cpu.sum().item()),
         "valid_combo": int(valid),
-        "lin_err_mean": float(err_lin_bar[survived].mean().item()) if valid else float("nan"),
-        "yaw_err_mean": float(err_yaw_bar[survived].mean().item()) if valid else float("nan"),
-        "lin_acc_mean": float(acc_lin[survived].mean().item()) if valid else float("nan"),
-        "yaw_acc_mean": float(acc_yaw[survived].mean().item()) if valid else float("nan"),
+        "lin_err_mean": float(err_lin_bar[valid_sample_mask].mean().item()) if valid else float("nan"),
+        "yaw_err_mean": float(err_yaw_bar[valid_sample_mask].mean().item()) if valid else float("nan"),
+        "lin_acc_mean": float(acc_lin[valid_sample_mask].mean().item()) if valid else float("nan"),
+        "yaw_acc_mean": float(acc_yaw[valid_sample_mask].mean().item()) if valid else float("nan"),
     }
 
     per_env = {
@@ -476,8 +508,10 @@ def _evaluate_combo(
         "acc_yaw": acc_yaw.detach().cpu(),
         "record_survival_s": record_survival_s.detach().cpu(),
         "tracking_acc": tracking_acc.detach().cpu(),
+        "tracking_err_mps": tracking_err_mps.detach().cpu(),
         "tracking_metric": ("yaw_acc" if combo_is_yaw else "lin_acc"),
         "survived_full_record": survived_full_record.detach().cpu(),
+        "valid_sample": valid_sample_cpu,
     }
     if video_recorder is not None:
         video_recorder.close()
@@ -498,7 +532,7 @@ def _evaluate_step_survival(
 ) -> tuple[float, dict]:
     if reset_before_start:
         # Keep step-survival as one sequence, but ensure it starts from a clean reset state.
-        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(1, int(reset_sync_steps_local)))
+        obs = _reset_env_for_new_test(env, unwrapped_env, runner, max(0, int(reset_sync_steps_local)))
 
     n_env = int(unwrapped_env.num_envs)
     command_dim = int(unwrapped_env.command_dim)
@@ -512,6 +546,13 @@ def _evaluate_step_survival(
     ]
 
     for phase_idx, (cmd_tuple, dur_s) in enumerate(sequence, start=1):
+        target = torch.zeros((n_env, command_dim), device=unwrapped_env.device, dtype=torch.float32)
+        target[:, 0] = cmd_tuple[0]
+        target[:, 1] = cmd_tuple[1]
+        if command_dim == 3:
+            target[:, 2] = cmd_tuple[2]
+        _set_command(unwrapped_env, target)
+
         if video_recorder is not None:
             video_recorder.start(f"step_phase_{phase_idx}_{cmd_tuple[0]}_{cmd_tuple[1]}_{cmd_tuple[2]}")
             obs = _record_video_reset_lead_in(
@@ -523,12 +564,6 @@ def _evaluate_step_survival(
                 video_recorder,
                 video_reset_lead_in_s_local,
             )
-        target = torch.zeros((n_env, command_dim), device=unwrapped_env.device, dtype=torch.float32)
-        target[:, 0] = cmd_tuple[0]
-        target[:, 1] = cmd_tuple[1]
-        if command_dim == 3:
-            target[:, 2] = cmd_tuple[2]
-        _set_command(unwrapped_env, target)
 
         steps = _steps_from_seconds(dur_s, step_dt)
         last5_count = max(1, _steps_from_seconds(5.0, step_dt))
@@ -588,7 +623,7 @@ def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 
 def _plot_combo_survival(details: list[dict], out_dir: Path) -> None:
     labels = [d["combo_id"] for d in details]
-    survived_counts = [int(d["n_survived"]) for d in details]
+    survived_counts = [int(d.get("n_valid", d["n_survived"])) for d in details]
     valid_flags = [int(d["valid_combo"]) for d in details]
 
     colors = ["#2ca02c" if v == 1 else "#d62728" for v in valid_flags]
@@ -598,8 +633,8 @@ def _plot_combo_survival(details: list[dict], out_dir: Path) -> None:
     ax.barh(y_pos, survived_counts, color=colors, alpha=0.9)
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels, fontsize=7)
-    ax.set_xlabel("Survived Envs")
-    ax.set_title("Velocity Tracking: Survived Count per Combo")
+    ax.set_xlabel("Valid Envs (survived + linear err <= threshold)")
+    ax.set_title("Velocity Tracking: Valid Count per Combo")
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
     fig.savefig(out_dir / "combo_survival.png", dpi=180)
@@ -906,8 +941,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                     "env_id": env_id,
                     "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
                     "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_err_mps": float(per_env["tracking_err_mps"][env_id].item()),
                     "tracking_metric": per_env["tracking_metric"],
                     "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                    "valid_sample": int(bool(per_env["valid_sample"][env_id].item())),
                 }
             )
         if detail["valid_combo"]:
@@ -916,8 +953,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             if combo.group in group_yaw_scores:
                 group_yaw_scores[combo.group].append(detail["yaw_acc_mean"])
 
-    vx_scan = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
-    vy_scan = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    vx_scan = _cfg_float_list(cfg_file.get("max_vx_scan_values"), [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0])
+    vy_scan = _cfg_float_list(cfg_file.get("max_vy_scan_values"), [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
     max_vx_per_env = torch.zeros((num_envs,), dtype=torch.float32)
     max_vy_per_env = torch.zeros((num_envs,), dtype=torch.float32)
 
@@ -946,8 +983,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                     "env_id": env_id,
                     "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
                     "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_err_mps": float(per_env["tracking_err_mps"][env_id].item()),
                     "tracking_metric": per_env["tracking_metric"],
                     "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                    "valid_sample": int(bool(per_env["valid_sample"][env_id].item())),
                 }
             )
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vx_pass_err)
@@ -978,8 +1017,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                     "env_id": env_id,
                     "record_survival_s": float(per_env["record_survival_s"][env_id].item()),
                     "tracking_acc": float(per_env["tracking_acc"][env_id].item()),
+                    "tracking_err_mps": float(per_env["tracking_err_mps"][env_id].item()),
                     "tracking_metric": per_env["tracking_metric"],
                     "survived_full_record": int(bool(per_env["survived_full_record"][env_id].item())),
+                    "valid_sample": int(bool(per_env["valid_sample"][env_id].item())),
                 }
             )
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vy_pass_err)
@@ -1039,6 +1080,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         "cmd_wz",
         "n_env",
         "n_survived",
+        "n_valid",
         "valid_combo",
         "lin_err_mean",
         "yaw_err_mean",
@@ -1049,7 +1091,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     _write_csv(
         out_dir / "metrics_per_env_details.csv",
         per_env_rows,
-        ["group", "combo_id", "env_id", "record_survival_s", "tracking_acc", "tracking_metric", "survived_full_record"],
+        [
+            "group",
+            "combo_id",
+            "env_id",
+            "record_survival_s",
+            "tracking_acc",
+            "tracking_err_mps",
+            "tracking_metric",
+            "survived_full_record",
+            "valid_sample",
+        ],
     )
 
     with open(out_dir / "run_meta.json", "w", encoding="utf-8") as f:
@@ -1070,6 +1122,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                 "record_s": record_s,
                 "max_vx_pass_err": max_vx_pass_err,
                 "max_vy_pass_err": max_vy_pass_err,
+                "valid_tracking_error_mps": valid_tracking_error_mps,
                 "fixed_speed_from_start": fixed_speed_from_start,
                 "reset_between_combos": reset_between_combos,
                 "eval_reset_strategy": eval_reset_strategy,
