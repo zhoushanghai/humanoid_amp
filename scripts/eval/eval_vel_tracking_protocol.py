@@ -142,6 +142,7 @@ settle_s = float(cfg_file.get("settle_s", 2.0))
 record_s = float(cfg_file.get("record_s", 10.0))
 max_vx_pass_err = float(cfg_file.get("max_vx_pass_err", 0.5))
 max_vy_pass_err = float(cfg_file.get("max_vy_pass_err", 0.3))
+fixed_speed_from_start = bool(cfg_file.get("fixed_speed_from_start", True))
 
 agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm_name.lower() == "ppo" else f"skrl_{algorithm_name.lower()}_cfg_entry_point"
 
@@ -259,7 +260,15 @@ def _safe_std(values: list[float]) -> float:
     return float(math.sqrt(var))
 
 
-def _evaluate_combo(env, unwrapped_env, runner: Runner, obs: dict, combo: Combo, step_dt: float) -> tuple[dict, dict]:
+def _evaluate_combo(
+    env,
+    unwrapped_env,
+    runner: Runner,
+    obs: dict,
+    combo: Combo,
+    step_dt: float,
+    use_fixed_speed_from_start: bool,
+) -> tuple[dict, dict]:
     n_env = int(unwrapped_env.num_envs)
     command_dim = int(unwrapped_env.command_dim)
     goal = torch.zeros((n_env, command_dim), device=unwrapped_env.device, dtype=torch.float32)
@@ -274,10 +283,13 @@ def _evaluate_combo(env, unwrapped_env, runner: Runner, obs: dict, combo: Combo,
         nonlocal survived
         survived = torch.logical_and(survived, ~done_mask.to(unwrapped_env.device))
 
-    ramp_steps = _steps_from_seconds(ramp_dur, step_dt)
-    for ramp_target in _ramp_targets(goal, ramp_inc):
-        _set_command(unwrapped_env, ramp_target)
-        obs = _run_steps(env, runner, obs, ramp_steps, on_step=update_survival)
+    if use_fixed_speed_from_start:
+        _set_command(unwrapped_env, goal)
+    else:
+        ramp_steps = _steps_from_seconds(ramp_dur, step_dt)
+        for ramp_target in _ramp_targets(goal, ramp_inc):
+            _set_command(unwrapped_env, ramp_target)
+            obs = _run_steps(env, runner, obs, ramp_steps, on_step=update_survival)
 
     _set_command(unwrapped_env, goal)
     obs = _run_steps(env, runner, obs, _steps_from_seconds(settle_s, step_dt), on_step=update_survival)
@@ -578,7 +590,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     combos = _build_combos()
     for combo in combos:
-        detail, per_env, obs = _evaluate_combo(env, unwrapped_env, runner, obs, combo, step_dt)
+        detail, per_env, obs = _evaluate_combo(
+            env,
+            unwrapped_env,
+            runner,
+            obs,
+            combo,
+            step_dt,
+            use_fixed_speed_from_start=fixed_speed_from_start,
+        )
         details.append(detail)
         if detail["valid_combo"]:
             if combo.group in group_lin_scores:
@@ -593,14 +613,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     for spd in vx_scan:
         combo = Combo("max_vx_scan", f"max_vx_{spd:.2f}", spd, 0.0, 0.0)
-        detail, per_env, obs = _evaluate_combo(env, unwrapped_env, runner, obs, combo, step_dt)
+        detail, per_env, obs = _evaluate_combo(
+            env,
+            unwrapped_env,
+            runner,
+            obs,
+            combo,
+            step_dt,
+            use_fixed_speed_from_start=fixed_speed_from_start,
+        )
         details.append(detail)
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vx_pass_err)
         max_vx_per_env[pass_mask] = float(spd)
 
     for spd in vy_scan:
         combo = Combo("max_vy_scan", f"max_vy_{spd:.2f}", 0.0, spd, 0.0)
-        detail, per_env, obs = _evaluate_combo(env, unwrapped_env, runner, obs, combo, step_dt)
+        detail, per_env, obs = _evaluate_combo(
+            env,
+            unwrapped_env,
+            runner,
+            obs,
+            combo,
+            step_dt,
+            use_fixed_speed_from_start=fixed_speed_from_start,
+        )
         details.append(detail)
         pass_mask = per_env["survived"] & (per_env["err_lin_bar"] < max_vy_pass_err)
         max_vy_per_env[pass_mask] = float(spd)
@@ -679,6 +715,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
                 "record_s": record_s,
                 "max_vx_pass_err": max_vx_pass_err,
                 "max_vy_pass_err": max_vy_pass_err,
+                "fixed_speed_from_start": fixed_speed_from_start,
                 "summary": summary,
                 **step_diag,
             },

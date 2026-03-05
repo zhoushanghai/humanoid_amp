@@ -818,3 +818,20 @@ conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
   --config configs/eval_velocity_tracking.yaml \
   --headless
 ```
+
+## Configuration Change
+
+- **Date**: 2026-03-05
+- **Action**: 新建固定速度起始评测分支并调整评测逻辑（无 ramp 起步）。
+- **Details**:
+    - **分支**: `eval-fixed-speed-start`
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增配置开关 `fixed_speed_from_start`（默认 `True`）。
+      - `fixed_speed_from_start=True` 时，combo 测试从第一步直接使用目标速度，不执行 ramp 阶段。
+      - `run_meta.json` 新增 `fixed_speed_from_start` 字段，便于结果追溯。
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增 `fixed_speed_from_start: true`，并补充注释说明。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```

@@ -19,3 +19,7 @@ record_s: 10.0
 
 max_vx_pass_err: 0.5
 max_vy_pass_err: 0.3
+
+# True: 每个测试点从第一步就使用目标速度（不做 ramp）
+# False: 使用文档中的 ramp -> settle -> record
+fixed_speed_from_start: true
