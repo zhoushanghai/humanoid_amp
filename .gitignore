@@ -7,3 +7,4 @@ outputs/*
 humanoid_amp.egg-info/
 .vscode/
 .claude/
+tmp/

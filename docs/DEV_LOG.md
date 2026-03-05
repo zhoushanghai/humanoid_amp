@@ -238,6 +238,17 @@ python -m humanoid_amp.train \
       `curriculum_margin`、
       `curriculum_threshold`、
       `curriculum_triggered`。
+
+## Documentation Update
+
+- **Date**: 2026-03-05
+- **Action**: 新增跨项目可复用的速度跟踪测试执行文档。
+- **Details**:
+    - **文件**: `docs/vel_tracking_test_protocol.md`
+    - 从 `docs/vel_tracking_metrics.md` 提取测试流程、命令集合、指标公式、聚合口径与 CSV 字段。
+    - 新增执行检查清单，便于在不同项目中落地同一评测标准。
+- **Execution Record**:
+    - 无命令执行（本次为文档编写与规则整理）。
     - 保留并继续记录分轴指标：
       `curriculum_avg_track_rew_xy`、`curriculum_avg_track_rew_z`、
       `curriculum_margin_xy`、`curriculum_margin_z`、
@@ -623,3 +634,187 @@ python -m humanoid_amp.play \
 ## 关键命令
 
 - **[2026-03-03]** `git commit`: docs(readme): 精简安装训练Play说明 / simplify install train play docs
+
+## Documentation Update
+
+- **Date**: 2026-03-05
+- **Action**: 新增 Velocity Tracking 全量正式评测计划文档（去除冒烟阶段）。
+- **Details**:
+    - **文件**: `docs/plan_velocity_tracking_eval.md`
+    - 明确“最终目标=一次全量运行产出完整指标”，不包含冒烟测试。
+    - 约束 checkpoint 为单点配置（`configs/eval_velocity_tracking.yaml` 的 `active_checkpoint`）。
+    - 固化输出字段、评测口径、命令集合与验收标准。
+- **Execution Record**:
+    - 无运行命令（本次仅文档落地与流程规范化）。
+
+## Evaluation Tooling
+
+- **Date**: 2026-03-05
+- **Action**: 新增 Velocity Tracking 全量评测配置与执行脚本。
+- **Details**:
+    - **文件**: `configs/eval_velocity_tracking.yaml`
+      - 新增评测统一配置，`active_checkpoint` 作为 checkpoint 单点修改入口。
+      - 固定评测关键参数：`num_envs=64`、`ramp/settle/record`、`max_vx/max_vy` 通过阈值。
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+      - 新增全量评测脚本，覆盖 `low_lin/high_lin/yaw_low/yaw_high/max_vx/max_vy/step_survival`。
+      - 输出 `metrics_summary.csv`、`metrics_combo_details.csv`、`run_meta.json`。
+      - 新增无 PyYAML 依赖的配置读取 fallback（支持简单 `key: value` 解析）。
+      - 修复 done mask 维度问题（统一 reshape 为 1D）以避免索引错误。
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Evaluation Run / Troubleshooting
+
+- **Date**: 2026-03-05
+- **Action**: 启动 Velocity Tracking 全量正式评测并完成运行链路排障。
+- **Details**:
+    - 初次运行报错：缺少 `yaml` 模块；通过脚本 fallback 解析修复。
+    - 运行报错：`--headless`、`--device` 与 `AppLauncher` 参数冲突；已移除重复参数定义。
+    - 运行报错：`/tmp/isaaclab/logs` 无写权限；通过设置 `TMPDIR=/home/hz/g1/humanoid_amp/tmp` 规避。
+    - 运行报错：`IndexError: too many indices`；修复 done mask 形状后重新启动。
+- **Execution Record**:
+```bash
+TMPDIR=/home/hz/g1/humanoid_amp/tmp \
+conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless
+```
+
+## Evaluation Stability Fix
+
+- **Date**: 2026-03-05
+- **Action**: 降低评测日志噪声并后台启动全量评测任务。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 将 `quat_rotate_inverse` 替换为 `quat_apply_inverse`，避免 IsaacLab 弃用告警高频刷屏。
+    - 重新启动正式评测任务并写入运行日志文件。
+- **Execution Record**:
+```bash
+nohup env TMPDIR=/home/hz/g1/humanoid_amp/tmp \
+  conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless > outputs/vel_tracking/eval_run.log 2>&1 &
+```
+
+## Configuration Change
+
+- **Date**: 2026-03-05
+- **Action**: 将 IsaacLab 默认日志临时目录从系统 `/tmp/isaaclab` 切换到项目本地可写目录。
+- **Details**:
+    - **文件**: `train.py`, `play.py`, `scripts/eval/eval_vel_tracking_protocol.py`
+    - 新增 `_configure_tmpdir()`，默认设置 `TMPDIR=./tmp`（仅当外部未显式设置 `TMPDIR` 时生效）。
+    - 启动前自动创建本地 `tmp/` 目录，避免系统 `/tmp/isaaclab/logs` 权限问题。
+    - **文件**: `.gitignore`
+      - 新增 `tmp/`，避免运行时临时文件进入版本控制。
+- **Execution Record**:
+```bash
+python -m py_compile play.py train.py scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Environment Configuration
+
+- **Date**: 2026-03-05
+- **Action**: 切换为全局 TMPDIR 方案，统一 IsaacLab 临时日志目录到用户目录。
+- **Details**:
+    - 用户选择全局方案：`TMPDIR=$HOME/isaaclab/tmp`。
+    - 已写入 `~/.bashrc`：
+      - `export TMPDIR="$HOME/isaaclab/tmp"`
+      - `mkdir -p "$TMPDIR"`
+    - 已创建目录：`~/isaaclab/tmp`。
+    - 回退项目内临时兜底改动，移除以下文件中的 `_configure_tmpdir()` 逻辑，避免重复策略：
+      - `train.py`
+      - `play.py`
+      - `scripts/eval/eval_vel_tracking_protocol.py`
+- **Execution Record**:
+```bash
+mkdir -p "$HOME/isaaclab/tmp"
+```
+
+## Environment Configuration
+
+- **Date**: 2026-03-05
+- **Action**: 修复 `conda run -n g1_amp` 未继承 `~/.bashrc` 导致 TMPDIR 失效的问题。
+- **Details**:
+    - 通过 `conda env config vars` 在 `g1_amp` 环境内持久设置：
+      `TMPDIR=/home/hz/isaaclab/tmp`。
+    - 验证 `conda run -n g1_amp python3 -c ...` 输出的 `tempfile.gettempdir()` 已切换到 `/home/hz/isaaclab/tmp`。
+- **Execution Record**:
+```bash
+conda env config vars set TMPDIR=/home/hz/isaaclab/tmp -n g1_amp
+conda env config vars list -n g1_amp
+```
+
+## Environment Configuration
+
+- **Date**: 2026-03-05
+- **Action**: 在 fish shell 中持久设置 TMPDIR 到用户目录。
+- **Details**:
+    - 执行 `set -Ux TMPDIR ~/isaaclab/tmp`，将 TMPDIR 设为 fish 全局持久变量。
+    - 验证 `fish -lc 'python3 -c ...'` 输出 `tempfile.gettempdir()` 为 `/home/hz/isaaclab/tmp`。
+- **Execution Record**:
+```bash
+mkdir -p /home/hz/isaaclab/tmp
+fish -lc 'set -Ux TMPDIR ~/isaaclab/tmp'
+```
+
+## Skill / Environment Update
+
+- **Date**: 2026-03-05
+- **Action**: 统一 fish 配置并更新 `new-machine-setup` Skill 的 fish 同步规则。
+- **Details**:
+    - **系统配置**: 在 `~/.config/fish/config.fish` 追加 IsaacLab TMPDIR 配置：
+      - `set -gx TMPDIR ~/isaaclab/tmp`
+      - `mkdir -p ~/isaaclab/tmp`
+    - **Skill 文件**: `/home/hz/.codex/skills/new-machine-setup/SKILL.md`
+      - Step 4 增加“先询问是否安装/使用 fish shell”规则。
+      - 若使用 fish，要求同步更新 `~/.bashrc` 与 `~/.config/fish/config.fish`。
+      - 预做列表新增 fish 选项，完成态说明同步 fish 配置。
+- **Execution Record**:
+```bash
+fish -lc 'echo TMPDIR=$TMPDIR; python3 -c "import tempfile; print(tempfile.gettempdir())"'
+```
+
+## Evaluation Visualization
+
+- **Date**: 2026-03-05
+- **Action**: 为 Velocity Tracking 评测新增图表输出，便于快速观察效果。
+- **Details**:
+    - **文件**: `scripts/eval/eval_vel_tracking_protocol.py`
+    - 在原有 `metrics_summary.csv`、`metrics_combo_details.csv`、`run_meta.json` 基础上新增自动绘图：
+      - `combo_survival.png`：每个 combo 的生存环境数量
+      - `combo_lin_acc.png`：有效 combo 的线速度准确率
+      - `summary_metrics.png`：关键汇总指标柱状图
+      - `step_alive_rate.png`：step-response 各 phase 存活率曲线
+- **Execution Record**:
+```bash
+python -m py_compile scripts/eval/eval_vel_tracking_protocol.py
+```
+
+## Experiment Record: Velocity Tracking Re-run (num_envs=100)
+
+- **Date**: 2026-03-05
+- **Model**: `logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/checkpoints/agent_5555000.pt`
+- **Configuration**:
+    - `num_envs = 100`（`configs/eval_velocity_tracking.yaml`）
+    - `task = Isaac-G1-AMP-Deploy-Direct-v0`
+    - `seed = 42`
+- **Phenomenon**:
+    - 评测完成并生成完整结果与图表目录：`outputs/vel_tracking/agent_5555000_2026-03-05_15-43-36`。
+    - 汇总指标：
+      - `low_lin_lin_acc = 74.6403`
+      - `high_lin_lin_acc = 88.0658`
+      - `yaw_low_yaw_acc = 0.2735`
+      - `yaw_high_yaw_acc = NaN`
+      - `max_vx = 0.0`
+      - `max_vy = 1.44`
+      - `step_survival = 0.0`
+- **Conclusion**:
+    - 增加并行数量后整体结论未改变：高难度/高速项仍以失败为主，step 生存率为 0。
+- **Execution Record**:
+```bash
+conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
+  --config configs/eval_velocity_tracking.yaml \
+  --headless
+```

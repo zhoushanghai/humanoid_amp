@@ -1,0 +1,21 @@
+# 文件用途: Velocity Tracking 全量评测统一配置（checkpoint 单点维护）
+# 主要内容: active_checkpoint, task, num_envs, seed, device, output_dir, 评测窗口参数
+
+active_checkpoint: logs/skrl/g1_amp_dance/2026-02-28_01-40-17_ppo_torch/checkpoints/agent_5555000.pt
+
+task: Isaac-G1-AMP-Deploy-Direct-v0
+algorithm: AMP
+ml_framework: torch
+num_envs: 100
+seed: 42
+device: cuda:0
+
+output_dir: outputs/vel_tracking
+
+ramp_inc: 0.2
+ramp_dur: 0.5
+settle_s: 2.0
+record_s: 10.0
+
+max_vx_pass_err: 0.5
+max_vy_pass_err: 0.3
