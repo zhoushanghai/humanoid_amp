@@ -1,0 +1,20 @@
+# 文件用途: G1-AMP-Poprioception 任务的独立 motion prior 配置。
+# 主要内容: 初始复用现有 walk/run motion 列表，后续可替换为探索专用 motion 数据。
+
+motion_files:
+  - ../../../datasets/g1_amp_nzp/walk1_subject1.npz
+  - ../../../datasets/g1_amp_nzp/walk1_subject2.npz
+  - ../../../datasets/g1_amp_nzp/walk1_subject5.npz
+  - ../../../datasets/g1_amp_nzp/walk2_subject1.npz
+  - ../../../datasets/g1_amp_nzp/walk2_subject3.npz
+  - ../../../datasets/g1_amp_nzp/walk2_subject4.npz
+  - ../../../datasets/g1_amp_nzp/walk3_subject1.npz
+  - ../../../datasets/g1_amp_nzp/walk3_subject2.npz
+  - ../../../datasets/g1_amp_nzp/walk3_subject3.npz
+  - ../../../datasets/g1_amp_nzp/walk3_subject4.npz
+  - ../../../datasets/g1_amp_nzp/walk3_subject5.npz
+  - ../../../datasets/g1_amp_nzp/walk4_subject1.npz
+  - ../../../datasets/g1_amp_nzp/run1_subject2.npz
+  - ../../../datasets/g1_amp_nzp/run1_subject5.npz
+  - ../../../datasets/g1_amp_nzp/run2_subject1.npz
+  - ../../../datasets/g1_amp_nzp/run2_subject4.npz

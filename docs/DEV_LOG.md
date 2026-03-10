@@ -226,6 +226,7 @@ python -m humanoid_amp.train \
 ```
 
 - **[2026-02-26]** `git commit`: feat(env): z轴课程独立触发 / split z-axis curriculum trigger
+- **[2026-03-10]** `git commit`: docs(docs): 归档旧文档并新增探索规划 / archive docs and add exploration plan
 
 ## Bug Fix
 
@@ -1234,3 +1235,210 @@ conda run -n g1_amp python scripts/eval/eval_vel_tracking_protocol.py \
 ```
 
 - **[2026-03-05]** `git commit`: feat(eval): 支持0.5起扫速 / support 0.5-start speed scan
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 为新的“主动探索触觉建图”任务新增项目说明文档，并归档旧任务文档。
+- **Details**:
+    - **新增文件**: `docs/project_tactile_exploration_mapping.md`
+      - 基于当前仓库结构梳理三阶段路线：
+        - 阶段 1：AMP 主动探索运控
+        - 阶段 2：本体感知到局部 3D 体素的离线感知训练
+        - 阶段 3：运控与感知联合训练
+      - 文档中明确了与现有代码的对接位置：
+        - `__init__.py`：新增 task 注册入口
+        - `g1_amp_env_cfg.py`：探索任务配置与观测/奖励开关
+        - `g1_amp_env.py`：探索奖励、历史观测与日志扩展
+        - `train.py`：训练入口延用
+      - 按用户反馈将文档口径调整为“说明文档”而非计划文档，移除了 `plan` 命名与 `Checklist` 结构，保留任务背景、技术路线、判断标准和后续工作方向。
+    - **归档目录**: `docs/archive/2026-03-10_pre_tactile_exploration/`
+      - 迁移旧文档：
+        - `docs/TROUBLESHOOTING_KB.md`
+        - `docs/deploy_g1.md`
+        - `docs/human_amp.png`
+        - `docs/plan_ablation_history_obs.md`
+        - `docs/plan_add_last_actions.md`
+        - `docs/plan_auto_obs_space.md`
+        - `docs/plan_fix_history_reset.md`
+        - `docs/plan_modify_policy_obs.md`
+        - `docs/plan_velocity_tracking_eval.md`
+        - `docs/vel_tracking_metrics.md`
+        - `docs/vel_tracking_test_protocol.md`
+    - **文档位置修正**:
+        - 将 `docs/archive/DEV_LOG.md` 移回 `docs/DEV_LOG.md`，保持项目日志固定在 `docs/` 根目录。
+- **Execution Record**:
+```bash
+mkdir -p docs/archive/2026-03-10_pre_tactile_exploration
+
+mv docs/TROUBLESHOOTING_KB.md \
+  docs/deploy_g1.md \
+  docs/human_amp.png \
+  docs/plan_ablation_history_obs.md \
+  docs/plan_add_last_actions.md \
+  docs/plan_auto_obs_space.md \
+  docs/plan_fix_history_reset.md \
+  docs/plan_modify_policy_obs.md \
+  docs/plan_velocity_tracking_eval.md \
+  docs/vel_tracking_metrics.md \
+  docs/vel_tracking_test_protocol.md \
+  docs/archive/2026-03-10_pre_tactile_exploration/
+
+mv docs/plan_tactile_exploration_mapping.md \
+  docs/project_tactile_exploration_mapping.md
+
+mv docs/archive/DEV_LOG.md \
+  docs/DEV_LOG.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 新增 `G1-AMP-Poprioception` 第一阶段任务的实施计划文档，并统一任务命名。
+- **Details**:
+    - **新增文件**: `docs/plan_g1_amp_poprioception.md`
+    - **参考基线**:
+        - `__init__.py` 中的 `Isaac-G1-AMP-Deploy-Direct-v0`
+        - `g1_amp_env_cfg.py` 中的 `G1AmpDeployEnvCfg`
+        - `g1_amp_env.py` 中的 `_setup_scene()`、`_get_observations()`、`_get_rewards()`
+        - `agents/skrl_g1_deploy_amp_cfg.yaml`
+        - `g1_cfg.py` 中已启用的 contact sensor
+    - **计划范围**:
+        - 每个环境增加 `3m x 3m` 房间
+        - 随机生成 `1~3` 个固定立方体/圆柱体障碍物
+        - 第一版只做 `style reward + exploration reward`
+        - 探索奖励包含接触点数量、新表面网格和 `1 / 3 / 5` 几何权重
+    - **实现取舍**:
+        - 第一版复用 Deploy 的本体感知观测和 AMP 训练主干
+        - 关闭速度命令跟踪奖励
+        - “方向随机”先收敛为绕 `z` 轴的 `yaw` 随机，以优先保证基础版本稳定
+        - 按用户新要求，除 `__init__.py` 注册外，环境、配置、场景、奖励、常量和 agent 配置都拆到独立文件中，不与旧任务实现混写
+        - 任务命名统一为 `G1-AMP-Poprioception`，对应 Gym ID 统一为 `Isaac-G1-AMP-Poprioception-Direct-v0`
+- **Execution Record**:
+```bash
+# 本次仅新增计划文档，无代码执行命令
+# docs/plan_g1_amp_poprioception.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 调整 `G1-AMP-Poprioception` 计划文档中的第一版障碍物尺寸范围。
+- **Details**:
+    - **文件**: `docs/plan_g1_amp_poprioception.md`
+    - **变更**:
+        - 立方体边长：`0.20m ~ 0.60m` -> `0.40m ~ 0.80m`
+        - 圆柱半径：`0.12m ~ 0.28m` -> `0.20m ~ 0.35m`
+        - 高度范围：统一为 `0.50m ~ 1.00m`
+    - **原因**:
+        - 保持障碍物足够大，便于早期接触探索。
+        - 同时避免在 `3m x 3m` 房间且 `1~3` 个障碍物设置下过度拥挤。
+- **Execution Record**:
+```bash
+# 文档参数更新
+# docs/plan_g1_amp_poprioception.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 收敛 `G1-AMP-Poprioception` 第一版奖励范围，只保留上肢有效接触点奖励。
+- **Details**:
+    - **文件**: `docs/plan_g1_amp_poprioception.md`
+    - **变更**:
+        - 第一版 `exploration reward` 只保留 `contact count reward`
+        - 明确仅统计上肢相关接触：手、前臂、上臂
+        - 将表面网格奖励与几何权重奖励移出第一版范围
+        - 同步精简 Planned File Changes、Acceptance Criteria、Risks、Checklist、Open Questions
+    - **原因**:
+        - 先训练一个稳定的基础探索模型
+        - 避免第一版实现过多奖励逻辑，增加调试复杂度
+- **Execution Record**:
+```bash
+# 文档范围收敛
+# docs/plan_g1_amp_poprioception.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 纠正 `G1-AMP-Poprioception` 第一版奖励范围的文档理解偏差。
+- **Details**:
+    - **文件**: `docs/plan_g1_amp_poprioception.md`
+    - **纠正内容**:
+        - 第一版并不是“只保留 contact count reward”
+        - 用户的真实要求是：只把“有效接触部位”限制为上肢相关 body（手、前臂、上臂）
+        - 表面网格奖励与几何权重奖励恢复到第一版范围
+        - 表面网格边长默认设为 `0.10m`
+    - **同步修改**:
+        - 恢复 Scope、Reward Design、Planned File Changes、Acceptance Criteria、Risks、Checklist、Open Questions 中与表面网格和几何权重相关的条目
+        - 保留“只统计上肢相关接触”的限制
+- **Execution Record**:
+```bash
+# 文档语义纠正
+# docs/plan_g1_amp_poprioception.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 重新整理 `G1-AMP-Poprioception` 计划文档结构，并补充实现前仍缺失的信息项。
+- **Details**:
+    - **文件**: `docs/plan_g1_amp_poprioception.md`
+    - **整理内容**:
+        - 合并重复的命名、范围、训练设置和奖励说明
+        - 将文档重构为：
+          Objective / Confirmed Decisions / Scope / Environment Spec / Training Defaults / Reward Design / Planned Files / Acceptance Criteria / Missing Info / Recommended Defaults / Checklist
+        - 保留已确认的关键决策：
+          - 任务命名 `G1-AMP-Poprioception`
+          - 独立文件实现
+          - `3m x 3m` 房间
+          - `1~3` 个固定立方体/圆柱体
+          - 上肢有效接触 + 表面网格 + 几何权重
+          - 表面网格边长 `0.10m`
+    - **新增补充**:
+        - 新增 `Missing Info` 小节，明确实现前仍需确认：
+          - 上肢有效接触的精确 body name
+          - 障碍物布局采样硬约束
+          - contact count 的统计口径
+          - 表面网格坐标化细节
+          - 边角区域阈值
+          - 默认训练参数是否沿用 Deploy
+          - motion prior 数据源
+        - 新增 `Recommended Defaults`，给出未指定时的建议默认值。
+- **Execution Record**:
+```bash
+# 文档重构与补充缺失信息
+# docs/plan_g1_amp_poprioception.md
+```
+
+## Documentation Update
+
+- **Date**: 2026-03-10
+- **Action**: 为 `G1-AMP-Poprioception` 补充已确认实现细节，并新增独立 motion prior 配置文件。
+- **Details**:
+    - **更新文件**: `docs/plan_g1_amp_poprioception.md`
+    - **新增确认项**:
+        - 上肢有效接触默认包含：
+          - `left_rubber_hand`
+          - `right_rubber_hand`
+          - `left_elbow_link`
+          - `right_elbow_link`
+          - `left_shoulder_yaw_link`
+          - `right_shoulder_yaw_link`
+        - 障碍物表面之间最小间距：`0.5m`
+        - 新任务使用独立 motion prior 文件：`motions/motion_poprioception.yaml`
+        - 推荐默认统计口径：
+          - `contact_count_mode = body_object_pairs`
+          - `contact_count_per_step_cap = 4`
+    - **新增文件**: `motions/motion_poprioception.yaml`
+      - 作为 `G1-AMP-Poprioception` 的独立 motion prior 配置入口。
+      - 第一版先复用现有 walk/run motion 列表，后续再替换为探索专用 motion 数据。
+- **Execution Record**:
+```bash
+# 更新计划文档
+# docs/plan_g1_amp_poprioception.md
+
+# 新建独立 motion prior 配置
+# motions/motion_poprioception.yaml
+```
