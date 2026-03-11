@@ -4,16 +4,16 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-Script to play a checkpoint of an RL agent from skrl.
-
-Visit the skrl documentation (https://skrl.readthedocs.io) to see the examples structured in
-a more user-friendly way.
+Purpose: Play skrl humanoid AMP checkpoints, optionally record videos, and support command/viewer overrides for evaluation.
+Main contents: CLI parsing, checkpoint resolution, optional speed config injection, viewer preset switching, and video-recorded rollout playback.
 """
 
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import datetime
 import json
+import os
 import sys
 
 from isaaclab.app import AppLauncher
@@ -64,6 +64,25 @@ parser.add_argument(
     help="The RL algorithm used for training the skrl agent.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument(
+    "--camera_view",
+    type=str,
+    default="default",
+    choices=["default", "topdown"],
+    help="Viewer preset used during play. Use 'topdown' for a bird's-eye video.",
+)
+parser.add_argument(
+    "--camera_height",
+    type=float,
+    default=12.0,
+    help="Camera height in meters when --camera_view topdown is enabled.",
+)
+parser.add_argument(
+    "--camera_lookat_z",
+    type=float,
+    default=0.8,
+    help="Target z position in meters when --camera_view topdown is enabled.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -78,6 +97,18 @@ sys.argv = [sys.argv[0]] + hydra_args
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+
+
+def _build_video_name_prefix(checkpoint_path: str | None, task_name: str | None) -> str:
+    """Build a stable video prefix from checkpoint or task name plus a timestamp."""
+    if checkpoint_path:
+        base_name = os.path.basename(checkpoint_path).split(".")[0]
+    elif task_name:
+        base_name = task_name
+    else:
+        base_name = "play"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return f"{base_name}_{timestamp}"
 
 """Rest everything follows."""
 
@@ -233,6 +264,17 @@ def _apply_speed_config_if_needed(env):
     )
 
 
+def _apply_viewer_preset_if_needed(env_cfg) -> None:
+    """Apply viewer overrides before the environment is created."""
+    if args_cli.camera_view != "topdown" or not hasattr(env_cfg, "viewer"):
+        return
+
+    env_cfg.viewer.origin_type = "env"
+    env_cfg.viewer.env_index = 0
+    env_cfg.viewer.eye = (0.0, 0.0, float(args_cli.camera_height))
+    env_cfg.viewer.lookat = (0.0, 0.0, float(args_cli.camera_lookat_z))
+
+
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, experiment_cfg: dict):
     """Play with skrl agent."""
@@ -275,6 +317,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+    _apply_viewer_preset_if_needed(env_cfg)
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -297,9 +340,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
+            "name_prefix": _build_video_name_prefix(args_cli.checkpoint, args_cli.task),
             "disable_logger": True,
         }
-        print("[INFO] Recording videos during training.")
+        print("[INFO] Recording videos during play.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 

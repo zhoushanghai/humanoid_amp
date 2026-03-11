@@ -4,15 +4,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-Script to train RL agent with skrl.
-
-Visit the skrl documentation (https://skrl.readthedocs.io) to see the examples structured in
-a more user-friendly way.
+Purpose: Train skrl agents for humanoid AMP tasks and always export a final checkpoint for follow-up play/debug runs.
+Main contents: CLI parsing, Isaac Sim launch, experiment directory setup, optional video capture, and final checkpoint export.
 """
 
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import datetime
+import os
 import sys
 
 from isaaclab.app import AppLauncher
@@ -107,10 +107,30 @@ sys.argv = [sys.argv[0]] + hydra_args
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+
+def _build_video_name_prefix(checkpoint_path: str | None, task_name: str | None) -> str:
+    """Build a stable video prefix from checkpoint or task name plus a timestamp."""
+    if checkpoint_path:
+        base_name = os.path.basename(checkpoint_path).split(".")[0]
+    elif task_name:
+        base_name = task_name
+    else:
+        base_name = "train"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return f"{base_name}_{timestamp}"
+
+
+def _save_final_checkpoint(runner: "Runner", log_dir: str) -> str:
+    """Persist a final checkpoint so short smoke runs remain immediately playable."""
+    checkpoint_dir = os.path.join(log_dir, "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, "agent_last.pt")
+    runner.agent.save(checkpoint_path)
+    return checkpoint_path
+
 """Rest everything follows."""
 
 import logging
-import os
 import random
 import time
 from datetime import datetime
@@ -272,6 +292,7 @@ def main(
             "video_folder": os.path.join(log_dir, "videos", "train"),
             "step_trigger": lambda step: step % args_cli.video_interval == 0,
             "video_length": args_cli.video_length,
+            "name_prefix": _build_video_name_prefix(args_cli.checkpoint, args_cli.task),
             "disable_logger": True,
         }
         print("[INFO] Recording videos during training.")
@@ -301,6 +322,8 @@ def main(
 
     # run training
     runner.run()
+    final_checkpoint_path = _save_final_checkpoint(runner, log_dir)
+    print(f"[INFO] Saved final checkpoint to: {final_checkpoint_path}")
 
     print(f"Training time: {round(time.time() - start_time, 2)} seconds")
 

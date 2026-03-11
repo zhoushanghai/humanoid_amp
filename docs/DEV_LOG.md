@@ -1442,3 +1442,362 @@ mv docs/archive/DEV_LOG.md \
 # 新建独立 motion prior 配置
 # motions/motion_poprioception.yaml
 ```
+
+## Code Update
+
+- **Date**: 2026-03-10
+- **Action**: 实现独立的 `G1-AMP-Poprioception` 任务代码骨架，并接入房间、障碍物与探索奖励。
+- **Details**:
+    - **新增文件**:
+        - `g1_amp_poprioception_constants.py`
+        - `g1_amp_poprioception_scene.py`
+        - `g1_amp_poprioception_rewards.py`
+        - `g1_amp_poprioception_env_cfg.py`
+        - `g1_amp_poprioception_env.py`
+        - `agents/skrl_g1_amp_poprioception_cfg.yaml`
+    - **修改文件**:
+        - `__init__.py`
+        - `docs/plan_g1_amp_poprioception.md`
+    - **实现内容**:
+        - 注册新 Gym ID：`Isaac-G1-AMP-Poprioception-Direct-v0`
+        - 新建独立环境配置，沿用 Deploy 的 AMP/history 结构，但关闭速度命令跟踪
+        - 为每个环境创建独立 `3m x 3m` 墙体房间
+        - 预生成 `3` 个 obstacle slot 对应的 cube / cylinder 候选资产，并为其配置上肢过滤 contact sensor
+        - 在 physics 启动前按环境随机采样障碍物尺寸库
+        - 在每次 reset 时随机采样：
+          - 启用数量 `1~3`
+          - slot 的 `cube / cylinder` 类型
+          - 位置
+          - `yaw`
+        - 实现探索奖励：
+          - `body-object pair` 接触计数
+          - 表面网格首次触达
+          - `1 / 3 / 5` 几何权重
+        - 在 reward log 中补充探索相关统计项
+    - **实现说明**:
+        - 当前版本中，障碍物尺寸随机化放在 startup 阶段完成，而不是每次 reset 重新缩放。
+        - 原因是 Isaac Lab/PhysX 对单个刚体的 `xformOp:scale` 更适合在 simulation play 之前处理。
+- **Execution Record**:
+```bash
+# 静态语法校验
+python -m py_compile \
+  __init__.py \
+  g1_amp_poprioception_constants.py \
+  g1_amp_poprioception_scene.py \
+  g1_amp_poprioception_rewards.py \
+  g1_amp_poprioception_env_cfg.py \
+  g1_amp_poprioception_env.py
+```
+
+## Code Update
+
+- **Date**: 2026-03-10
+- **Action**: 补齐 `train.py` 与 `play.py` 的视频命名逻辑，并整理 `G1-AMP-Poprioception` 的基础测试命令。
+- **Details**:
+    - **修改文件**:
+        - `train.py`
+        - `play.py`
+    - **实现内容**:
+        - 为 `gym.wrappers.RecordVideo` 增加 `name_prefix`
+        - 命名格式统一为 `{checkpoint_or_task}_{timestamp}`
+        - 当未显式传入 checkpoint 时，回退到 task 名称作为视频名前缀
+    - **用途说明**:
+        - 避免生成默认的 `rl-video-step-*` 通用文件名
+        - 便于按 checkpoint 或任务名追踪训练/播放视频
+- **Execution Record**:
+```bash
+# 训练冒烟测试
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 32 \
+  --max_iterations 1 \
+  --headless
+
+# 可视化播放测试
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --checkpoint logs/skrl/g1_amp_poprioception/<run_name>/checkpoints/<checkpoint>.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 300
+```
+
+## Runtime Validation
+
+- **Date**: 2026-03-10
+- **Action**: 修复 `G1-AMP-Poprioception` 的场景初始化问题，并完成训练 / play 冒烟测试。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_poprioception_scene.py`
+        - `g1_amp_poprioception_env.py`
+        - `docs/plan_g1_amp_poprioception.md`
+    - **问题现象**:
+        - 直接运行短训练时，环境在 scene 初始化阶段报错：
+          - `RuntimeError: Unable to find source prim path: '/World/envs/env_.*/Room'`
+    - **根因分析**:
+        - 房间墙体与障碍物使用 regex prim path 进行批量 spawn，但其父级 prim
+          `Room` / `Obstacles` / `slot_*` 在每个环境下尚未预先创建。
+    - **修复动作**:
+        - 在 `g1_amp_poprioception_scene.py` 中新增 `create_scene_parent_prims(...)`
+        - 在 `g1_amp_poprioception_env.py` 的 `_setup_scene()` 中先创建父级 `Xform`，再 spawn 房间和障碍物
+    - **测试结论**:
+        - 最小训练冒烟成功，`Isaac-G1-AMP-Poprioception-Direct-v0` 可完成环境创建、仿真启动和 1 轮 AMP 更新
+        - 最小 play 成功，checkpoint 可正常加载并录制视频
+        - 生成视频：
+          - `logs/skrl/g1_amp_poprioception/2026-03-10_23-12-41_amp_torch/videos/play/best_agent_2026-03-10_23-13-08-step-0.mp4`
+    - **使用说明**:
+        - 本仓库应按 README 使用模块入口：
+          - `python -m humanoid_amp.train`
+          - `python -m humanoid_amp.play`
+        - 直接使用 `python train.py` 时，新 task 的 gym 注册不会自动执行。
+- **Execution Record**:
+```bash
+# 最小训练冒烟
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4 \
+  --max_iterations 1 \
+  --headless
+
+# 生成 checkpoint 的短训练
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4 \
+  --max_iterations 1 \
+  --headless \
+  agent.agent.experiment.checkpoint_interval=1
+
+# 最小 play 验证
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --checkpoint logs/skrl/g1_amp_poprioception/2026-03-10_23-12-41_amp_torch/checkpoints/best_agent.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 60 \
+  --headless
+```
+
+## Code Update
+
+- **Date**: 2026-03-10
+- **Action**: 收紧 `G1-AMP-Poprioception` 的出生与重置策略，减少机器人随机卡墙/穿模后长时间不重置的问题。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_poprioception_constants.py`
+        - `g1_amp_poprioception_env_cfg.py`
+        - `g1_amp_poprioception_scene.py`
+        - `g1_amp_poprioception_env.py`
+    - **问题现象**:
+        - 部分机器人会贴墙、穿入墙体附近或在角落卡住较长时间，episode 没有及时 reset。
+    - **根因分析**:
+        - 该任务原先沿用了更激进的 `reset_strategy = "random"`，会从 motion prior 的随机时刻起步；
+        - 在小房间里，这种起步姿态更容易一开始就处于不稳定状态；
+        - 布局采样失败时还会强行使用 fallback 障碍物位置，容易生成不理想场景；
+        - done 条件只看躯干高度，贴墙卡死但 pelvis 高度仍然正常时不会立即重置。
+    - **修复动作**:
+        - 将 `reset_strategy` 改为 `default`，统一从站立初始姿态开始；
+        - 新增 `room_termination_margin_m = 0.35`，当 root 进入靠墙危险区时提前终止；
+        - 删除 obstacle 采样失败时的强制 fallback，采不到合法位置时直接跳过该 slot。
+    - **用途说明**:
+        - 这些改动的目标不是让机器人“永远不碰墙”，而是避免训练初期因为坏出生状态或坏布局而长期卡死。
+        - 当前任务仍然是“一环境一机器人”；问题不在 env 数量映射，而在 reset 与终止策略过于宽松。
+- **Execution Record**:
+```bash
+# 回归测试
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4 \
+  --max_iterations 1 \
+  --headless
+```
+
+## Command Update
+
+- **Date**: 2026-03-10
+- **Action**: 整理 `G1-AMP-Poprioception` 的标准训练命令。
+- **Details**:
+    - **适用任务**:
+        - `Isaac-G1-AMP-Poprioception-Direct-v0`
+    - **相关配置**:
+        - `g1_amp_poprioception_env_cfg.py`
+        - `agents/skrl_g1_amp_poprioception_cfg.yaml`
+    - **说明**:
+        - 训练应使用模块入口 `python -m humanoid_amp.train`
+        - 不建议直接运行 `python train.py`
+- **Execution Record**:
+```bash
+# 标准训练命令
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 512 \
+  --max_iterations 5000 \
+  --headless
+```
+
+## Runtime Validation
+
+- **Date**: 2026-03-10
+- **Action**: 分析 `4096` 环境训练时的 PhysX 容量报错，并给出更稳的训练配置建议。
+- **Details**:
+    - **问题现象**:
+        - 使用 `--num_envs 4096` 训练 `Isaac-G1-AMP-Poprioception-Direct-v0` 时，PhysX 持续报错：
+          - `PxGpuDynamicsMemoryConfig::foundLostPairsCapacity` 不足
+    - **根因分析**:
+        - 该任务的 scene 使用 `replicate_physics=False`
+        - 每个环境都包含独立房间墙体和 obstacle candidates
+        - 与普通平地 locomotion 相比，broadphase pair 数量显著更高
+        - `4096` 环境对这个 heterogeneous scene 过重，默认 GPU pair buffer 不够
+    - **结论**:
+        - 这个任务不建议直接用 `4096` 环境起训
+        - 推荐先用 `512` 或 `1024`
+        - 如果坚持 `4096`，需要额外抬高 PhysX GPU capacities，但仍可能得不偿失
+- **Execution Record**:
+```bash
+# 推荐训练命令（更稳）
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 512 \
+  --max_iterations 5000 \
+  --headless
+
+# 更大吞吐版本（先尝试 1024）
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 1024 \
+  --max_iterations 5000 \
+  --headless
+
+# 若坚持 4096，可尝试手动抬高 PhysX buffer
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4096 \
+  --max_iterations 5000 \
+  --headless \
+  env.sim.physx.gpu_found_lost_pairs_capacity=268435456 \
+  env.sim.physx.gpu_found_lost_aggregate_pairs_capacity=268435456 \
+  env.sim.physx.gpu_total_aggregate_pairs_capacity=268435456 \
+  env.sim.physx.gpu_max_rigid_contact_count=33554432
+```
+
+## Bug Fix
+
+- **Date**: 2026-03-11
+- **Action**: 修复 `G1-AMP-Poprioception` 短训练 run 结束后没有可直接 `play` 的 checkpoint 的问题。
+- **Details**:
+    - **修改文件**:
+        - `train.py`
+        - `__init__.py`
+        - `docs/BUG_EXPERIENCE.md`
+    - **修复内容**:
+        - 在 `train.py` 的 `runner.run()` 之后固定导出 `checkpoints/agent_last.pt`
+        - 这样即使 `--max_iterations 1` 这类 smoke run，也会留下一个可直接复用的终态 checkpoint
+        - 在 `__init__.py` 中增加 `_safe_register(...)`，让本仓库自己的 Gym 注册保持幂等
+    - **验证结果**:
+        - 新 run `logs/skrl/g1_amp_poprioception/2026-03-11_00-03-47_amp_torch/` 已生成 `checkpoints/agent_last.pt`
+        - 不显式传 `--checkpoint` 执行 `play` 时，日志已自动解析并加载该文件
+        - 已输出验证视频：
+          `logs/skrl/g1_amp_poprioception/2026-03-11_00-03-47_amp_torch/videos/play/Isaac-G1-AMP-Poprioception-Direct-v0_2026-03-11_00-04-19-step-0.mp4`
+- **Execution Record**:
+```bash
+# 短训练回归：确认 run 结束后一定有 agent_last.pt
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 64 \
+  --max_iterations 1 \
+  --headless
+
+# 不显式传 checkpoint：确认 play 自动吃到最新 run 的 agent_last.pt
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 1 \
+  --video \
+  --video_length 30 \
+  --headless
+```
+
+## Troubleshooting
+
+- **Date**: 2026-03-11
+- **Action**: 排查在 Isaac Lab 的 `manager_based` 目录下直接执行 `python -m humanoid_amp.train` 时的模块导入失败。
+- **Details**:
+    - **问题现象**:
+        - 报错 `ModuleNotFoundError: No module named 'humanoid_amp'`
+        - 在 `fish` 中，首行失败后，后续 `--task ...` 被当成独立命令，继续报 `--task: 未找到命令`
+    - **根因分析**:
+        - 根据 `README.md`，本项目的标准安装方式是 `pip install -e .`
+        - 根据 `pyproject.toml`，包名来自当前仓库根目录，命令应在已安装本包的环境里执行
+        - 从 `~/tiangong/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based` 这类外部目录、且未切到项目环境时，`python -m humanoid_amp.train` 无法解析到本仓库包
+    - **正确做法**:
+        - 先切到本项目根目录
+        - 使用已安装本包的环境（当前项目为 `g1_amp`）
+        - `fish` 多行命令中不要在反斜杠续行之间插入空行
+- **Execution Record**:
+```bash
+# 推荐：切到项目根目录后再启动训练
+cd ~/g1/humanoid_amp
+conda activate g1_amp
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 1024 \
+  --max_iterations 5000000 \
+  --headless
+
+# 若当前环境还没安装本仓库包，先执行一次
+cd ~/g1/humanoid_amp
+pip install -e .
+```
+
+## Feature Update
+
+- **Date**: 2026-03-11
+- **Action**: 为 `play.py` 增加俯视相机预设，支持从上到下录制 `G1-AMP-Poprioception` 视频。
+- **Details**:
+    - **修改文件**:
+        - `play.py`
+    - **新增参数**:
+        - `--camera_view {default,topdown}`
+        - `--camera_height`
+        - `--camera_lookat_z`
+    - **实现方式**:
+        - 在 `gym.make(...)` 之前修改 `env_cfg.viewer`
+        - 当 `--camera_view topdown` 时：
+          - `viewer.origin_type = "env"`
+          - `viewer.env_index = 0`
+          - `viewer.eye = (0.0, 0.0, camera_height)`
+          - `viewer.lookat = (0.0, 0.0, camera_lookat_z)`
+        - 这样 viewport 相机会固定在环境 0 正上方，适合录制房间探索的俯视视频
+    - **验证结果**:
+        - 使用 checkpoint `logs/skrl/g1_amp_poprioception/2026-03-11_01-04-47_amp_torch/checkpoints/agent_1050000.pt` 成功录制俯视视频
+        - 输出文件：
+          `logs/skrl/g1_amp_poprioception/2026-03-11_01-04-47_amp_torch/videos/play/agent_1050000_2026-03-11_09-18-33-step-0.mp4`
+        - 已额外抽帧检查：
+          `tmp/topdown_check.png`
+- **Execution Record**:
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --checkpoint logs/skrl/g1_amp_poprioception/2026-03-11_01-04-47_amp_torch/checkpoints/agent_1050000.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 600 \
+  --camera_view topdown \
+  --headless
+```
+
+## 2026-03-11 关键命令
+
+- **[2026-03-11]** `git commit`: feat(env): 新增G1探索AMP任务 / add G1 exploration AMP task

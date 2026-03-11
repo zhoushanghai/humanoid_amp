@@ -4,7 +4,7 @@
 - Task Name: `G1-AMP-Poprioception`
 - Planned Gym ID: `Isaac-G1-AMP-Poprioception-Direct-v0`
 - Base Task: `Isaac-G1-AMP-Deploy-Direct-v0`
-- Status: Draft
+- Status: In Progress
 
 ## Objective
 
@@ -85,8 +85,8 @@
 
 布局约束：
 
-- 与墙体保留安全距离
-- 与机器人出生点保留最小距离
+- 与墙体保留安全距离：`0.25m`
+- 与机器人出生点保留最小距离：`0.75m`
 - 障碍物表面之间最小间距：`0.5m`
 
 ### 场景生成策略
@@ -96,6 +96,15 @@
 - 每次 reset 时决定每个 slot 是否启用，以及其类型、位置、尺寸、yaw。
 
 这样更适合当前 `clone_environments(copy_from_source=False)` 的工作方式，也更容易先做稳定基线。
+
+当前实现说明：
+
+- 由于 Isaac Lab 中单个刚体的 `xformOp:scale` 随机化只适合在 physics 启动前进行，第一版代码把障碍物尺寸改为 `startup` 时按环境采样一次。
+- 每次 `reset` 仍然会重新采样：
+  - 启用数量 `1~3`
+  - slot 对应类型 `cube / cylinder`
+  - 位置
+  - `yaw`
 
 ## Training Defaults
 
@@ -230,9 +239,6 @@
 
 下面这些信息仍建议在真正开始实现前补齐，否则实现过程中还会反复回头改：
 
-- 障碍物布局采样的硬约束数值
-  - 墙体安全距离
-  - 机器人出生点安全距离
 - Contact Count Reward 的统计口径
   - 按接触点数直接计数
   - 还是按 body-object 接触对计数
@@ -271,19 +277,30 @@
 
 ## Checklist
 
-- [ ] 在 `__init__.py` 中新增 `Isaac-G1-AMP-Poprioception-Direct-v0`
-- [ ] 新建 `g1_amp_poprioception_env_cfg.py`
-- [ ] 新建 `g1_amp_poprioception_env.py`
-- [ ] 新建 `g1_amp_poprioception_scene.py`
-- [ ] 新建 `g1_amp_poprioception_rewards.py`
-- [ ] 新建 `g1_amp_poprioception_constants.py`
-- [ ] 新建 `agents/skrl_g1_amp_poprioception_cfg.yaml`
-- [ ] 实现房间与 obstacle slot
-- [ ] 实现 `1~3` 个障碍物的 reset 随机化
-- [ ] 实现障碍物尺寸与 yaw 随机化
-- [ ] 实现障碍物布局约束
-- [ ] 实现仅上肢有效的接触过滤
-- [ ] 实现表面网格离散与首次触达判定
-- [ ] 实现 `1 / 3 / 5` 几何权重逻辑
-- [ ] 在 `_get_rewards()` 中接入探索奖励日志
-- [ ] 验证训练初始化和第一轮短训练
+- ✅ ~~在 `__init__.py` 中新增 `Isaac-G1-AMP-Poprioception-Direct-v0`~~
+- ✅ ~~新建 `g1_amp_poprioception_env_cfg.py`~~
+- ✅ ~~新建 `g1_amp_poprioception_env.py`~~
+- ✅ ~~新建 `g1_amp_poprioception_scene.py`~~
+- ✅ ~~新建 `g1_amp_poprioception_rewards.py`~~
+- ✅ ~~新建 `g1_amp_poprioception_constants.py`~~
+- ✅ ~~新建 `agents/skrl_g1_amp_poprioception_cfg.yaml`~~
+- ✅ ~~实现房间与 obstacle slot~~
+- ✅ ~~实现 `1~3` 个障碍物的 reset 随机化~~
+- ✅ ~~实现障碍物尺寸与 yaw 随机化~~
+- ✅ ~~实现障碍物布局约束~~
+- ✅ ~~实现仅上肢有效的接触过滤~~
+- ✅ ~~实现表面网格离散与首次触达判定~~
+- ✅ ~~实现 `1 / 3 / 5` 几何权重逻辑~~
+- ✅ ~~在 `_get_rewards()` 中接入探索奖励日志~~
+- ✅ ~~验证训练初始化和第一轮短训练~~
+
+## Completion Summary
+
+- 已完成最小训练冒烟验证：
+  - `python -m humanoid_amp.train --task Isaac-G1-AMP-Poprioception-Direct-v0 --algorithm AMP --num_envs 4 --max_iterations 1 --headless`
+- 已完成最小 play 验证：
+  - 使用 `best_agent.pt` 成功回放并录制 `60` 帧视频
+- 运行时修复：
+  - 补齐每个环境下的 `Room` / `Obstacles` / `slot_*` 父级 prim，解决 regex spawn 时的缺失父 prim 报错
+- 当前结论：
+  - 新任务已经可以完成环境创建、短训练、checkpoint 加载和 play 录像闭环
