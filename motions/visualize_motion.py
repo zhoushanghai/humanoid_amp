@@ -14,7 +14,7 @@ Arguments:
     --file    Path to the npz file containing motion data
 
 Example:
-    python visualize_motion.py --file G1_dance.npz
+    python visualize_motion.py --file <motion_file.npz>
 
 Output:
     Generates an HTML file with interactive plots in the same directory as the input file.

@@ -32,62 +32,7 @@ python motion_viewer.py --file MOTION_FILE_NAME.npz
 
 See `python motion_viewer.py --help` for available arguments.
 
-Humanoid:
-```
-dof_names:
-  Data type: <U16
-  Data shape: (28,)
-  Joint names:
-    1. abdomen_x
-    2. abdomen_y
-    3. abdomen_z
-    4. neck_x
-    5. neck_y
-    6. neck_z
-    7. right_shoulder_x
-    8. right_shoulder_y
-    9. right_shoulder_z
-    10. right_elbow
-    11. left_shoulder_x
-    12. left_shoulder_y
-    13. left_shoulder_z
-    14. left_elbow
-    15. right_hip_x
-    16. right_hip_y
-    17. right_hip_z
-    18. right_knee
-    19. right_ankle_x
-    20. right_ankle_y
-    21. right_ankle_z
-    22. left_hip_x
-    23. left_hip_y
-    24. left_hip_z
-    25. left_knee
-    26. left_ankle_x
-    27. left_ankle_y
-    28. left_ankle_z
-
-body_names:
-  Data type: <U15
-  Data shape: (15,)
-  Body part names:
-    1. pelvis
-    2. torso
-    3. head
-    4. right_upper_arm
-    5. right_lower_arm
-    6. right_hand
-    7. left_upper_arm
-    8. left_lower_arm
-    9. left_hand
-    10. right_thigh
-    11. right_shin
-    12. right_foot
-    13. left_thigh
-    14. left_shin
-    15. left_foot
-```
-G1:
+G1 example:
 ```
 dof_names:
   Data type: <U26

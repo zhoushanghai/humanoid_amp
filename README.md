@@ -1,5 +1,7 @@
 # humanoid_amp
 
+单任务版本的 G1 AMP 仓库，只保留 `Isaac-G1-AMP-Poprioception-Direct-v0`。
+
 ## 安装
 
 ```bash
@@ -8,9 +10,25 @@ pip install -e .
 
 ## 训练
 
+快速冒烟：
+
 ```bash
 python -m humanoid_amp.train \
-  --task Isaac-G1-AMP-Deploy-Direct-v0 \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 64 \
+  --max_iterations 1 \
+  --headless
+```
+
+完整训练：
+
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4096 \
+  --max_iterations 5000000 \
   --headless
 ```
 
@@ -18,7 +36,10 @@ python -m humanoid_amp.train \
 
 ```bash
 python -m humanoid_amp.play \
-  --task Isaac-G1-AMP-Deploy-Direct-v0 \
-  --num_envs 32 \
-  --checkpoint logs/skrl/g1_amp_dance/2026-02-22_11-40-31_ppo_torch/checkpoints/agent_50000.pt
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --checkpoint logs/skrl/g1_amp_poprioception/<run_name>/checkpoints/agent_last.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 300
 ```

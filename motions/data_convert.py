@@ -147,7 +147,7 @@ def parse_args():
     parser.add_argument(
         "--output",
         type=str,
-        default="motions/custom_motion.npz",
+        default="motions/converted_motion.npz",
         help="Output NPZ filename",
     )
     parser.add_argument("--start", type=int, default=0, help="Start frame index")

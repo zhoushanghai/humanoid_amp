@@ -1837,6 +1837,7 @@ python -m humanoid_amp.play \
 
 - **[2026-03-11]** `git commit`: feat(env): 新增G1探索AMP任务 / add G1 exploration AMP task
 - **[2026-03-11]** `git commit`: perf(env): 降低日志同步并加入场景池 / throttle logs and add scene bank
+- **[2026-03-11]** `git commit`: refactor(env): 清理为单任务仓库 / reduce repo to single task
 
 ## Documentation Update
 
@@ -1948,4 +1949,75 @@ python -m py_compile \
 ```bash
 python -m py_compile \
   g1_amp_poprioception_env_cfg.py
+```
+
+## Code Update
+
+- **Date**: 2026-03-11
+- **Action**: 将仓库清理为仅保留 `Isaac-G1-AMP-Poprioception-Direct-v0` 的单任务版本。
+- **Details**:
+    - **修改文件**:
+        - `__init__.py`
+        - `g1_amp_env_cfg.py`
+        - `g1_amp_poprioception_env_cfg.py`
+        - `README.md`
+        - `motions/README.md`
+        - `motions/data_convert.py`
+        - `motions/verify_motion.py`
+        - `motions/visualize_motion.py`
+        - `docs/plan_single_task_cleanup.md`
+    - **运行时清理**:
+        - `__init__.py` 只保留 `Isaac-G1-AMP-Poprioception-Direct-v0` 注册项。
+        - 删除旧 G1 任务与旧 `Isaac-Humanoid-AMP-*` 的注册入口、旧 agent 配置、旧 deploy/velocity-tracking 脚本与相关 motion 资产。
+        - 删除 `humanoid_amp_env.py` / `humanoid_amp_env_cfg.py`，避免项目继续携带非 G1 旧环境。
+    - **配置链重构**:
+        - `G1AmpPoprioceptionEnvCfg` 改为直接继承 `G1AmpEnvCfg`。
+        - 将 proprioception 仍在使用的 reward、command、history、scene-bank 配置直接固化到 `g1_amp_poprioception_env_cfg.py`。
+        - 移除旧 `Deploy / Walk / Dance / Custom` 配置类，避免单任务仓库继续依赖被删除任务命名。
+    - **文档与资产清理**:
+        - `README.md` 改为 proprioception-only 训练 / play 入口。
+        - 将 `docs/plan_g1_amp_poprioception.md`、`docs/project_tactile_exploration_mapping.md` 与顶层 `project.md` 迁移到 `docs/archive/2026-03-11_single_task_cleanup/`。
+        - motion 工具说明改为通用或 proprioception 相关表述，不再默认引用旧 dance/custom motion 文件。
+- **Execution Record**:
+```bash
+python -m py_compile \
+  __init__.py \
+  g1_amp_env.py \
+  g1_amp_env_cfg.py \
+  g1_amp_poprioception_env.py \
+  g1_amp_poprioception_env_cfg.py \
+  play.py \
+  train.py \
+  motions/data_convert.py \
+  motions/motion_viewer.py \
+  motions/verify_motion.py \
+  motions/visualize_motion.py
+```
+
+## Runtime Validation
+
+- **Date**: 2026-03-11
+- **Action**: 验证单任务清理后 `Isaac-G1-AMP-Poprioception-Direct-v0` 的训练入口仍可用。
+- **Details**:
+    - **验证结果**:
+        - `64 env / max_iterations=1`：成功完成环境创建、仿真启动、scene bank 构建、AMP 训练 1 轮，并导出 `agent_last.pt`。
+        - `4096 env / max_iterations=1`：成功完成环境创建、仿真启动、`4096 x 16` scene bank 构建、AMP 训练 1 轮，并导出 `agent_last.pt`。
+    - **结论**:
+        - 当前清理没有破坏你关心的训练命令入口。
+        - `python -m humanoid_amp.train --task Isaac-G1-AMP-Poprioception-Direct-v0 --algorithm AMP --num_envs 4096 --max_iterations 5000000 --headless` 在本次修改后仍具备继续训练的前提。
+- **Execution Record**:
+```bash
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 64 \
+  --max_iterations 1 \
+  --headless
+
+python -m humanoid_amp.train \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --num_envs 4096 \
+  --max_iterations 1 \
+  --headless
 ```

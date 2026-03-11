@@ -15,7 +15,7 @@ Arguments:
     --file    Path to the npz file containing motion data
 
 Example:
-    python verify_motion.py --file G1_dance.npz
+    python verify_motion.py --file <motion_file.npz>
 
 Output:
     Prints detailed information about the motion data file, including:
