@@ -1798,6 +1798,154 @@ python -m humanoid_amp.play \
   --headless
 ```
 
+## Bug Fix
+
+- **Date**: 2026-03-11
+- **Action**: 修复 `G1-AMP-Poprioception` 在 `play` 时偶发空房间、看不到任何障碍物的问题。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_poprioception_scene.py`
+        - `docs/BUG_EXPERIENCE.md`
+    - **根因**:
+        - `play.py` 每次启动后都会重新 `env.reset()`
+        - proprioception 环境会在 reset 时重新采样障碍物布局，而不是复用 checkpoint 对应的场景
+        - 当 `sample_episode_obstacle_layout(...)` 对当前 episode 的所有启用 slot 都采样失败时，所有候选障碍物会继续停留在隐藏位置 `z = -10.0`
+    - **修复内容**:
+        - 抽取 `_is_layout_position_valid(...)` 统一位置合法性判断
+        - 保留原有随机 rejection sampling
+        - 若某个环境在本轮 reset 后没有任何 active obstacle，则执行 `_place_fallback_obstacle(...)`
+        - fallback 会从当前候选形状中选择 footprint 最小的障碍物，并放到房间角落的合法位置，保证至少有一个可见障碍物
+    - **验证结果**:
+        - 使用 `agent_1050000.pt` 重新执行 top-down `play` 后，已成功录出包含障碍物的视频：
+          `logs/skrl/g1_amp_poprioception/2026-03-11_01-04-47_amp_torch/videos/play/agent_1050000_2026-03-11_09-31-12-step-0.mp4`
+        - 抽帧验证文件：
+          `tmp/obstacle_visible_check.png`
+- **Execution Record**:
+```bash
+python -m humanoid_amp.play \
+  --task Isaac-G1-AMP-Poprioception-Direct-v0 \
+  --algorithm AMP \
+  --checkpoint logs/skrl/g1_amp_poprioception/2026-03-11_01-04-47_amp_torch/checkpoints/agent_1050000.pt \
+  --num_envs 1 \
+  --video \
+  --video_length 60 \
+  --camera_view topdown \
+  --headless
+```
+
 ## 2026-03-11 关键命令
 
 - **[2026-03-11]** `git commit`: feat(env): 新增G1探索AMP任务 / add G1 exploration AMP task
+- **[2026-03-11]** `git commit`: perf(env): 降低日志同步并加入场景池 / throttle logs and add scene bank
+
+## Documentation Update
+
+- **Date**: 2026-03-11
+- **Action**: 新增 `RayCaster` 感知替代方案的实施计划文档。
+- **Details**:
+    - **文件**: `docs/plan_raycaster_perception.md`
+    - 记录 `G1-AMP-Poprioception` 从手写 `surface_grid` 感知逻辑迁移到 Isaac Lab 官方 `RayCaster` / `MultiMeshRayCaster` 的方案边界。
+    - 明确第一阶段推荐采用“混合方案”：
+      保留 `contact_count`，引入 ray-based observation，下线 `surface_grid` / `geometry` 奖励。
+    - 记录主要风险：
+      ray 数量过大可能把瓶颈转移到 GPU；
+      若完全移除 tactile reward，会改变任务定义。
+- **Execution Record**:
+    - 无命令执行（本次为方案讨论与计划文档落盘）。
+
+## Documentation Update
+
+- **Date**: 2026-03-11
+- **Action**: 新增训练吞吐优化实施计划文档。
+- **Details**:
+    - **文件**: `docs/plan_training_efficiency.md`
+    - 明确两条主要优化方向：
+      1. 环境侧日志同步降频，而不仅仅是调低 TensorBoard writer 的 `write_interval`
+      2. 重构 reset 后的障碍物布局逻辑，优先考虑 scene bank，其次才是 GPU 采样器
+    - 记录关键判断：
+      完全固定单一场景虽然最快，但会降低场景多样性并增加过拟合风险；
+      因此更推荐“有限固定布局池 + reset 时索引采样”的折中方案。
+- **Execution Record**:
+    - 无命令执行（本次为方案讨论与计划文档落盘）。
+
+## Code Update
+
+- **Date**: 2026-03-11
+- **Action**: 落地 `G1-AMP-Poprioception` 训练吞吐优化的第一阶段实现。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_env.py`
+        - `g1_amp_env_cfg.py`
+        - `g1_amp_poprioception_env.py`
+        - `g1_amp_poprioception_env_cfg.py`
+        - `g1_amp_poprioception_scene.py`
+        - `docs/plan_training_efficiency.md`
+    - **日志同步优化**:
+        - 在 `G1AmpEnv` 新增 `env_log_interval_steps`、`_should_emit_env_logs()` 与 `_clear_env_logs()`，将环境侧 `.item()` 标量导出改成按步节流。
+        - 删除环境内重复的 `agent.track_data(...)`，改为只通过 `self.extras["log"]` 交给 skrl trainer 统一写日志，避免每步重复 GPU/CPU 同步。
+        - `G1AmpPoprioceptionEnvCfg` 默认将 `env_log_interval_steps` 设为 `50`，降低 proprioception 奖励日志的同步频率。
+    - **reset 逻辑优化**:
+        - 在 `g1_amp_poprioception_scene.py` 中新增 `build_obstacle_scene_bank(...)` 与 `sample_scene_bank_layouts(...)`。
+        - 启动时为每个环境预生成固定数量的合法障碍物布局，reset 时仅随机索引一个 layout，而不再重新做 CPU rejection sampling。
+        - `G1AmpPoprioceptionEnvCfg` 新增 `scene_bank_size`，当前默认值为 `16`，用于控制布局池大小与启动开销之间的折中。
+    - **当前验证**:
+        - 已通过 `python -m py_compile` 完成语法级检查。
+        - 尚未补充训练前后吞吐、GPU-Util、平均 episode length 的对比实验。
+- **Execution Record**:
+```bash
+python -m py_compile \
+  g1_amp_env.py \
+  g1_amp_env_cfg.py \
+  g1_amp_poprioception_env.py \
+  g1_amp_poprioception_env_cfg.py \
+  g1_amp_poprioception_scene.py
+```
+
+## Code Update
+
+- **Date**: 2026-03-11
+- **Action**: 修正大规模训练时 `scene bank` 初始化“卡住”的问题。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_poprioception_env.py`
+        - `g1_amp_poprioception_env_cfg.py`
+        - `g1_amp_poprioception_scene.py`
+        - `docs/plan_training_efficiency.md`
+    - **问题现象**:
+        - 使用 `--num_envs 4096` 启动训练时，日志停在 `Motion loaded` 之后很久没有后续输出，表面上像是训练卡住。
+    - **根因**:
+        - `G1AmpPoprioceptionEnvCfg` 中的 `scene_bank_size` 被设置成了 `500`。
+        - 在 `4096` 个环境下，这意味着启动时要在 CPU 上预生成 `4096 x 500 = 2,048,000` 份合法障碍物布局，初始化成本过高。
+    - **修复内容**:
+        - 将默认 `scene_bank_size` 调回 `16`。
+        - 新增 `scene_bank_total_layout_budget = 8192`，在运行时按 `num_envs` 自动收紧 `scene_bank_size`，防止大规模训练触发指数级初始化开销。
+        - 增加 `scene bank` 初始化进度输出，避免长时间无日志时误判为死锁。
+    - **当前行为**:
+        - 当使用 `4096` 个环境训练时，实际 `scene_bank_size` 会被自动收紧到 `2`。
+        - 当使用 `1024` 个环境训练时，默认仍可保留 `8` 个 layout；若手动降低 `num_envs`，则最多恢复到配置上限 `16`。
+- **Execution Record**:
+```bash
+python -m py_compile \
+  g1_amp_poprioception_env.py \
+  g1_amp_poprioception_env_cfg.py \
+  g1_amp_poprioception_scene.py
+```
+
+## Code Update
+
+- **Date**: 2026-03-11
+- **Action**: 上调 `scene bank` 总布局预算，增加 `4096 env` 训练时的场景多样性。
+- **Details**:
+    - **修改文件**:
+        - `g1_amp_poprioception_env_cfg.py`
+    - **配置变更**:
+        - 将 `scene_bank_total_layout_budget` 从 `8192` 调整为 `16384`。
+    - **作用解释**:
+        - 该参数用于限制所有环境合计最多预生成多少套障碍物布局。
+        - 在 `4096` 个环境下，实际 `scene_bank_size` 会从 `2` 提升到 `4`，即总共预生成 `16384` 套布局。
+        - 这会增加 reset 时可抽样的房间布局多样性，但也会相应增加初始化时间。
+- **Execution Record**:
+```bash
+python -m py_compile \
+  g1_amp_poprioception_env_cfg.py
+```

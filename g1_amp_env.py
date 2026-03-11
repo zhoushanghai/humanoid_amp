@@ -3,6 +3,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""
+Purpose: Implement the shared G1 AMP direct RL environment and reward/logging pipeline.
+Main contents: motion-based reset, policy/AMP observations, command tracking rewards, and throttled env logging helpers.
+"""
+
 from __future__ import annotations
 
 import gymnasium as gym
@@ -154,6 +159,18 @@ class G1AmpEnv(DirectRLEnv):
             self._just_reset_mask = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
+
+    def _env_log_interval_steps(self) -> int:
+        """Return the configured number of env steps between expensive scalar log exports."""
+        return max(int(getattr(self.cfg, "env_log_interval_steps", 1)), 1)
+
+    def _should_emit_env_logs(self) -> bool:
+        """Whether the current env step should export scalar logs to skrl."""
+        return bool(self.common_step_counter % self._env_log_interval_steps() == 0)
+
+    def _clear_env_logs(self) -> None:
+        """Expose an empty log payload on steps where scalar exports are skipped."""
+        self.extras["log"] = {}
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -435,6 +452,10 @@ class G1AmpEnv(DirectRLEnv):
         # ================= total reward ==========================
         total_reward = basic_reward + rew_track_cmd_total
 
+        if not self._should_emit_env_logs():
+            self._clear_env_logs()
+            return total_reward
+
         # ============== log ================================
         log_dict = {
             "total_reward": total_reward.mean().item(),
@@ -489,21 +510,6 @@ class G1AmpEnv(DirectRLEnv):
                 log_dict[key] = float(value)
 
         self.extras["log"] = log_dict
-
-        # directly record to TensorBoard (if agent is available)
-        if (
-            hasattr(self, "_skrl_agent")
-            and getattr(self, "_skrl_agent", None) is not None
-        ):
-            try:
-                agent = getattr(self, "_skrl_agent")
-                for k, v in log_dict.items():
-                    if k.startswith("cmd_") or k.startswith("curriculum_"):
-                        agent.track_data(f"Curriculum / {k}", v)
-                    else:
-                        agent.track_data(f"Reward / {k}", v)
-            except Exception:
-                pass
 
         return total_reward
 

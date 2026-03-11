@@ -1,6 +1,7 @@
 """
 Purpose: Build the static room scene and obstacle candidate library for the G1 AMP proprioception task.
-Main contents: room asset configs, obstacle candidate configs, startup size randomization, and per-reset layout sampling.
+Main contents: room asset configs, obstacle candidate configs, startup size randomization, precomputed scene-bank
+generation, progress reporting, and fallback obstacle placement.
 """
 
 from __future__ import annotations
@@ -320,83 +321,218 @@ def yaw_to_quat_wxyz(yaw: torch.Tensor) -> torch.Tensor:
     return quat
 
 
-def sample_episode_obstacle_layout(
-    env_origins: torch.Tensor,
-    candidate_shape_params: torch.Tensor,
-    env_ids: torch.Tensor,
-    device: str,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Sample which candidates are active and where they are placed for one reset."""
-    cpu_device = torch.device("cpu")
-    env_ids_cpu = env_ids.to(device=cpu_device, dtype=torch.long)
-    origins_cpu = env_origins[env_ids].to(device=cpu_device)
-    shape_params_cpu = candidate_shape_params[env_ids].to(device=cpu_device)
+def _is_layout_position_valid(
+    x: float,
+    y: float,
+    radius: float,
+    placed_centers: Sequence[tuple[float, float, float]],
+) -> bool:
+    """Check whether an obstacle center is valid against robot spawn clearance and other obstacles."""
+    if math.hypot(x, y) < (ROBOT_SPAWN_CLEARANCE_M + radius):
+        return False
 
-    num_envs = len(env_ids_cpu)
-    num_candidates = shape_params_cpu.shape[1]
-    active_mask = torch.zeros((num_envs, num_candidates), dtype=torch.bool, device=cpu_device)
-    positions = torch.zeros((num_envs, num_candidates, 3), dtype=torch.float32, device=cpu_device)
-    yaws = torch.zeros((num_envs, num_candidates), dtype=torch.float32, device=cpu_device)
-    positions[:, :, 2] = HIDDEN_OBSTACLE_Z_M
+    for prev_x, prev_y, prev_radius in placed_centers:
+        min_center_distance = prev_radius + radius + OBSTACLE_SURFACE_SPACING_M
+        if math.hypot(x - prev_x, y - prev_y) < min_center_distance:
+            return False
 
-    for row_index in range(num_envs):
-        placed_centers: list[tuple[float, float, float]] = []
-        num_active_slots = int(torch.randint(1, NUM_OBSTACLE_SLOTS + 1, (1,), device=cpu_device).item())
-        slot_order = torch.randperm(NUM_OBSTACLE_SLOTS, device=cpu_device)
-        enabled_slots = set(slot_order[:num_active_slots].tolist())
-        origin_x = float(origins_cpu[row_index, 0].item())
-        origin_y = float(origins_cpu[row_index, 1].item())
+    return True
 
-        for slot_index in range(NUM_OBSTACLE_SLOTS):
-            cube_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cube"]
-            cyl_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cylinder"]
 
-            if slot_index not in enabled_slots:
-                continue
+def _place_fallback_obstacle(
+    row_index: int,
+    origin_x: float,
+    origin_y: float,
+    shape_params_row: torch.Tensor,
+    active_mask: torch.Tensor,
+    positions: torch.Tensor,
+    yaws: torch.Tensor,
+    placed_centers: list[tuple[float, float, float]],
+    cpu_device: torch.device,
+) -> None:
+    """Guarantee that each reset leaves at least one obstacle visible in the room."""
+    candidate_order = sorted(
+        range(shape_params_row.shape[0]),
+        key=lambda candidate_index: compute_layout_radius(
+            candidate_index % len(OBSTACLE_KINDS),
+            shape_params_row[candidate_index],
+        ),
+    )
+    corner_signs = ((1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0))
 
-            chosen_kind = int(torch.randint(0, len(OBSTACLE_KINDS), (1,), device=cpu_device).item())
-            candidate_index = slot_index * len(OBSTACLE_KINDS) + chosen_kind
-            kind_id = chosen_kind
-            params = shape_params_cpu[row_index, candidate_index]
-            radius = compute_layout_radius(kind_id, params)
+    for candidate_index in candidate_order:
+        kind_id = candidate_index % len(OBSTACLE_KINDS)
+        params = shape_params_row[candidate_index]
+        radius = compute_layout_radius(kind_id, params)
+        max_extent = ROOM_HALF_EXTENT_M - ROOM_WALL_MARGIN_M - radius
+        if max_extent <= 0.0:
+            continue
 
-            sample_limit = 64
-            chosen_xy: tuple[float, float] | None = None
-            for _ in range(sample_limit):
-                max_extent = ROOM_HALF_EXTENT_M - ROOM_WALL_MARGIN_M - radius
-                if max_extent <= 0.0:
-                    break
-                x = float(torch.empty(1, device=cpu_device).uniform_(-max_extent, max_extent).item())
-                y = float(torch.empty(1, device=cpu_device).uniform_(-max_extent, max_extent).item())
-                if math.hypot(x, y) < (ROBOT_SPAWN_CLEARANCE_M + radius):
-                    continue
-
-                valid = True
-                for prev_x, prev_y, prev_radius in placed_centers:
-                    min_center_distance = prev_radius + radius + OBSTACLE_SURFACE_SPACING_M
-                    if math.hypot(x - prev_x, y - prev_y) < min_center_distance:
-                        valid = False
-                        break
-                if valid:
-                    chosen_xy = (x, y)
-                    placed_centers.append((x, y, radius))
-                    break
-
-            if chosen_xy is None:
+        for sign_x, sign_y in corner_signs:
+            x = sign_x * max_extent
+            y = sign_y * max_extent
+            if not _is_layout_position_valid(x, y, radius, placed_centers):
                 continue
 
             active_mask[row_index, candidate_index] = True
-            height = float(params[2].item())
-            positions[row_index, candidate_index, 0] = origin_x + chosen_xy[0]
-            positions[row_index, candidate_index, 1] = origin_y + chosen_xy[1]
-            positions[row_index, candidate_index, 2] = height * 0.5
+            positions[row_index, candidate_index, 0] = origin_x + x
+            positions[row_index, candidate_index, 1] = origin_y + y
+            positions[row_index, candidate_index, 2] = float(params[2].item()) * 0.5
             yaws[row_index, candidate_index] = float(
                 torch.empty(1, device=cpu_device).uniform_(-math.pi, math.pi).item()
             )
+            placed_centers.append((x, y, radius))
 
-            inactive_candidate = cyl_candidate if chosen_kind == OBSTACLE_KIND_TO_ID["cube"] else cube_candidate
+            slot_index = candidate_index // len(OBSTACLE_KINDS)
+            cube_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cube"]
+            cyl_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cylinder"]
+            inactive_candidate = cyl_candidate if kind_id == OBSTACLE_KIND_TO_ID["cube"] else cube_candidate
             positions[row_index, inactive_candidate, 0] = origin_x
             positions[row_index, inactive_candidate, 1] = origin_y
             positions[row_index, inactive_candidate, 2] = HIDDEN_OBSTACLE_Z_M
+            return
 
-    return active_mask.to(device=device), positions.to(device=device), yaws.to(device=device)
+
+def _sample_local_obstacle_layout(
+    shape_params_row: torch.Tensor,
+    cpu_device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Sample one local obstacle layout for a single environment."""
+    num_candidates = shape_params_row.shape[0]
+    active_mask = torch.zeros((1, num_candidates), dtype=torch.bool, device=cpu_device)
+    positions = torch.zeros((1, num_candidates, 3), dtype=torch.float32, device=cpu_device)
+    yaws = torch.zeros((1, num_candidates), dtype=torch.float32, device=cpu_device)
+    positions[:, :, 2] = HIDDEN_OBSTACLE_Z_M
+
+    placed_centers: list[tuple[float, float, float]] = []
+    num_active_slots = int(torch.randint(1, NUM_OBSTACLE_SLOTS + 1, (1,), device=cpu_device).item())
+    slot_order = torch.randperm(NUM_OBSTACLE_SLOTS, device=cpu_device)
+    enabled_slots = set(slot_order[:num_active_slots].tolist())
+
+    for slot_index in range(NUM_OBSTACLE_SLOTS):
+        cube_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cube"]
+        cyl_candidate = slot_index * len(OBSTACLE_KINDS) + OBSTACLE_KIND_TO_ID["cylinder"]
+
+        if slot_index not in enabled_slots:
+            continue
+
+        chosen_kind = int(torch.randint(0, len(OBSTACLE_KINDS), (1,), device=cpu_device).item())
+        candidate_index = slot_index * len(OBSTACLE_KINDS) + chosen_kind
+        kind_id = chosen_kind
+        params = shape_params_row[candidate_index]
+        radius = compute_layout_radius(kind_id, params)
+
+        sample_limit = 64
+        chosen_xy: tuple[float, float] | None = None
+        for _ in range(sample_limit):
+            max_extent = ROOM_HALF_EXTENT_M - ROOM_WALL_MARGIN_M - radius
+            if max_extent <= 0.0:
+                break
+            x = float(torch.empty(1, device=cpu_device).uniform_(-max_extent, max_extent).item())
+            y = float(torch.empty(1, device=cpu_device).uniform_(-max_extent, max_extent).item())
+            if _is_layout_position_valid(x, y, radius, placed_centers):
+                chosen_xy = (x, y)
+                placed_centers.append((x, y, radius))
+                break
+
+        if chosen_xy is None:
+            continue
+
+        active_mask[0, candidate_index] = True
+        height = float(params[2].item())
+        positions[0, candidate_index, 0] = chosen_xy[0]
+        positions[0, candidate_index, 1] = chosen_xy[1]
+        positions[0, candidate_index, 2] = height * 0.5
+        yaws[0, candidate_index] = float(
+            torch.empty(1, device=cpu_device).uniform_(-math.pi, math.pi).item()
+        )
+
+        inactive_candidate = cyl_candidate if chosen_kind == OBSTACLE_KIND_TO_ID["cube"] else cube_candidate
+        positions[0, inactive_candidate, 0] = 0.0
+        positions[0, inactive_candidate, 1] = 0.0
+        positions[0, inactive_candidate, 2] = HIDDEN_OBSTACLE_Z_M
+
+    if not active_mask[0].any():
+        _place_fallback_obstacle(
+            row_index=0,
+            origin_x=0.0,
+            origin_y=0.0,
+            shape_params_row=shape_params_row,
+            active_mask=active_mask,
+            positions=positions,
+            yaws=yaws,
+            placed_centers=placed_centers,
+            cpu_device=cpu_device,
+        )
+
+    return active_mask[0], positions[0], yaws[0]
+
+
+def build_obstacle_scene_bank(
+    candidate_shape_params: torch.Tensor,
+    scene_bank_size: int,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Precompute a bank of valid obstacle layouts for each environment."""
+    cpu_device = torch.device("cpu")
+    shape_params_cpu = candidate_shape_params.to(device=cpu_device)
+    scene_bank_size = max(int(scene_bank_size), 1)
+
+    num_envs = shape_params_cpu.shape[0]
+    num_candidates = shape_params_cpu.shape[1]
+    active_mask_bank = torch.zeros(
+        (num_envs, scene_bank_size, num_candidates),
+        dtype=torch.bool,
+        device=cpu_device,
+    )
+    local_positions_bank = torch.zeros(
+        (num_envs, scene_bank_size, num_candidates, 3),
+        dtype=torch.float32,
+        device=cpu_device,
+    )
+    local_positions_bank[:, :, :, 2] = HIDDEN_OBSTACLE_Z_M
+    yaws_bank = torch.zeros(
+        (num_envs, scene_bank_size, num_candidates),
+        dtype=torch.float32,
+        device=cpu_device,
+    )
+    progress_interval_envs = max(num_envs // 8, 1)
+
+    for env_index in range(num_envs):
+        for layout_index in range(scene_bank_size):
+            active_mask, local_positions, yaws = _sample_local_obstacle_layout(
+                shape_params_row=shape_params_cpu[env_index],
+                cpu_device=cpu_device,
+            )
+            active_mask_bank[env_index, layout_index] = active_mask
+            local_positions_bank[env_index, layout_index] = local_positions
+            yaws_bank[env_index, layout_index] = yaws
+        if num_envs >= 256 and (
+            (env_index + 1) % progress_interval_envs == 0 or (env_index + 1) == num_envs
+        ):
+            print(f"[INFO]: Obstacle scene bank progress: {env_index + 1}/{num_envs} envs")
+
+    return (
+        active_mask_bank.to(device=device),
+        local_positions_bank.to(device=device),
+        yaws_bank.to(device=device),
+    )
+
+
+def sample_scene_bank_layouts(
+    scene_bank_active_mask: torch.Tensor,
+    scene_bank_local_positions: torch.Tensor,
+    scene_bank_yaws: torch.Tensor,
+    env_ids: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Select one precomputed layout per reset environment."""
+    layout_ids = torch.randint(
+        scene_bank_active_mask.shape[1],
+        (len(env_ids),),
+        device=env_ids.device,
+    )
+    return (
+        scene_bank_active_mask[env_ids, layout_ids],
+        scene_bank_local_positions[env_ids, layout_ids],
+        scene_bank_yaws[env_ids, layout_ids],
+    )

@@ -1,6 +1,7 @@
 """
 Purpose: Implement the standalone G1 AMP proprioception exploration environment.
-Main contents: scene wiring, startup obstacle library initialization, reset-time obstacle layout sampling, and exploration rewards.
+Main contents: scene wiring, startup obstacle library initialization, adaptively sized scene-bank
+reset sampling, and exploration rewards.
 """
 
 from __future__ import annotations
@@ -31,12 +32,13 @@ from .g1_amp_poprioception_rewards import (
 )
 from .g1_amp_poprioception_scene import (
     apply_startup_obstacle_scales,
+    build_obstacle_scene_bank,
     build_obstacle_candidate_cfgs,
     build_obstacle_candidate_specs,
     build_room_asset_cfgs,
     build_upper_body_contact_sensor_cfgs,
     create_scene_parent_prims,
-    sample_episode_obstacle_layout,
+    sample_scene_bank_layouts,
     sample_startup_obstacle_shape_params,
     yaw_to_quat_wxyz,
 )
@@ -68,6 +70,41 @@ class G1AmpPoprioceptionEnv(G1AmpEnv):
             self.candidate_kind_ids,
             self.candidate_shape_params,
             self.cfg.surface_grid_cell_size_m,
+        )
+        configured_scene_bank_size = max(int(getattr(self.cfg, "scene_bank_size", 1)), 1)
+        scene_bank_total_layout_budget = max(
+            int(
+                getattr(
+                    self.cfg,
+                    "scene_bank_total_layout_budget",
+                    configured_scene_bank_size * max(self.num_envs, 1),
+                )
+            ),
+            1,
+        )
+        budget_limited_scene_bank_size = max(
+            1,
+            scene_bank_total_layout_budget // max(self.num_envs, 1),
+        )
+        self.scene_bank_size = min(configured_scene_bank_size, budget_limited_scene_bank_size)
+        if self.scene_bank_size < configured_scene_bank_size:
+            print(
+                "[INFO]: Capping obstacle scene bank size from "
+                f"{configured_scene_bank_size} to {self.scene_bank_size} for {self.num_envs} envs "
+                f"(layout budget: {scene_bank_total_layout_budget})."
+            )
+        print(
+            "[INFO]: Building obstacle scene bank with "
+            f"{self.num_envs} envs x {self.scene_bank_size} layouts..."
+        )
+        (
+            self._scene_bank_active_mask,
+            self._scene_bank_local_positions,
+            self._scene_bank_yaws,
+        ) = build_obstacle_scene_bank(
+            candidate_shape_params=self.candidate_shape_params,
+            scene_bank_size=self.scene_bank_size,
+            device=self.device,
         )
         self.surface_grid_visited = torch.zeros(
             (self.num_envs, self.num_candidates, MAX_SURFACE_CELLS_PER_CANDIDATE),
@@ -143,12 +180,14 @@ class G1AmpPoprioceptionEnv(G1AmpEnv):
         self._reset_obstacle_layout(env_ids)
 
     def _reset_obstacle_layout(self, env_ids: torch.Tensor) -> None:
-        active_mask, positions, yaws = sample_episode_obstacle_layout(
-            env_origins=self.scene.env_origins,
-            candidate_shape_params=self.candidate_shape_params,
+        active_mask, local_positions, yaws = sample_scene_bank_layouts(
+            scene_bank_active_mask=self._scene_bank_active_mask,
+            scene_bank_local_positions=self._scene_bank_local_positions,
+            scene_bank_yaws=self._scene_bank_yaws,
             env_ids=env_ids,
-            device=self.device,
         )
+        positions = local_positions.clone()
+        positions += self.scene.env_origins[env_ids].unsqueeze(1)
         orientations = yaw_to_quat_wxyz(yaws.view(-1)).view(len(env_ids), self.num_candidates, 4)
 
         self.candidate_active_mask[env_ids] = active_mask
@@ -209,30 +248,18 @@ class G1AmpPoprioceptionEnv(G1AmpEnv):
         exploration_reward = contact_reward + surface_grid_reward + geometry_reward
         total_reward = total_reward + exploration_reward
 
-        if "log" not in self.extras:
-            self.extras["log"] = {}
-        self.extras["log"]["rew_contact_count"] = contact_reward.mean().item()
-        self.extras["log"]["rew_surface_grid"] = surface_grid_reward.mean().item()
-        self.extras["log"]["rew_geometry"] = geometry_reward.mean().item()
-        self.extras["log"]["rew_exploration_total"] = exploration_reward.mean().item()
-        self.extras["log"]["contact_pair_count_raw"] = raw_pair_count.mean().item()
-        self.extras["log"]["contact_pair_count_capped"] = contact_reward_count.mean().item()
-        self.extras["log"]["new_surface_cells"] = new_surface_cells.mean().item()
-        self.extras["log"]["geometry_weight_sum"] = geometry_weight_sum.mean().item()
-        self.extras["log"]["active_obstacles"] = self.candidate_active_mask.sum(dim=-1).float().mean().item()
-        self.extras["log"]["total_reward"] = total_reward.mean().item()
-
-        if hasattr(self, "_skrl_agent") and getattr(self, "_skrl_agent", None) is not None:
-            try:
-                agent = getattr(self, "_skrl_agent")
-                agent.track_data("Reward / rew_contact_count", self.extras["log"]["rew_contact_count"])
-                agent.track_data("Reward / rew_surface_grid", self.extras["log"]["rew_surface_grid"])
-                agent.track_data("Reward / rew_geometry", self.extras["log"]["rew_geometry"])
-                agent.track_data("Reward / rew_exploration_total", self.extras["log"]["rew_exploration_total"])
-                agent.track_data("Reward / contact_pair_count_raw", self.extras["log"]["contact_pair_count_raw"])
-                agent.track_data("Reward / new_surface_cells", self.extras["log"]["new_surface_cells"])
-                agent.track_data("Reward / geometry_weight_sum", self.extras["log"]["geometry_weight_sum"])
-            except Exception:
-                pass
+        if self._should_emit_env_logs():
+            self.extras["log"]["rew_contact_count"] = contact_reward.mean().item()
+            self.extras["log"]["rew_surface_grid"] = surface_grid_reward.mean().item()
+            self.extras["log"]["rew_geometry"] = geometry_reward.mean().item()
+            self.extras["log"]["rew_exploration_total"] = exploration_reward.mean().item()
+            self.extras["log"]["contact_pair_count_raw"] = raw_pair_count.mean().item()
+            self.extras["log"]["contact_pair_count_capped"] = contact_reward_count.mean().item()
+            self.extras["log"]["new_surface_cells"] = new_surface_cells.mean().item()
+            self.extras["log"]["geometry_weight_sum"] = geometry_weight_sum.mean().item()
+            self.extras["log"]["active_obstacles"] = (
+                self.candidate_active_mask.sum(dim=-1).float().mean().item()
+            )
+            self.extras["log"]["total_reward"] = total_reward.mean().item()
 
         return total_reward

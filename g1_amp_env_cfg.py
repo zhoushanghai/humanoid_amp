@@ -3,6 +3,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""
+Purpose: Define shared G1 AMP direct RL environment configurations.
+Main contents: base/deploy task defaults, observation and command settings, and environment logging knobs.
+"""
+
 from __future__ import annotations
 
 import os
@@ -35,6 +40,7 @@ class G1AmpEnvCfg(DirectRLEnvCfg):
     episode_length_s = 10.0
     decimation = 2
     track_vel_range = (0.0, 0.0)
+    env_log_interval_steps = 1
 
     # spaces
     observation_space = (
@@ -94,6 +100,7 @@ class G1AmpEnvCfg_CUSTOM(DirectRLEnvCfg):
     # env
     episode_length_s = 10.0
     decimation = 1
+    env_log_interval_steps = 1
     track_vel_range = (-1.0, 1.0)  # backward-compatible fallback for vx range
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (0.0, 0.0)

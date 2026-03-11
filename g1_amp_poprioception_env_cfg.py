@@ -1,6 +1,7 @@
 """
 Purpose: Define the standalone environment configuration for the G1 AMP proprioception exploration task.
-Main contents: AMP training defaults, heterogeneous scene settings, and exploration reward hyperparameters.
+Main contents: AMP training defaults, heterogeneous scene settings, exploration reward hyperparameters,
+and training-efficiency knobs for logging and adaptive scene-bank reset sampling.
 """
 
 from __future__ import annotations
@@ -49,6 +50,11 @@ class G1AmpPoprioceptionEnvCfg(G1AmpDeployEnvCfg):
 
     episode_length_s = 20.0
     reset_strategy = "default"
+    env_log_interval_steps = 50
+    scene_bank_size = 16
+    scene_bank_total_layout_budget = 4096 * scene_bank_size
+    # scene_bank_total_layout_budget = 16384
+
 
     rew_track_vel = 0.0
     rew_track_ang_vel_z = 0.0
