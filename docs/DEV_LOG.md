@@ -227,6 +227,7 @@ python -m humanoid_amp.train \
 
 - **[2026-02-26]** `git commit`: feat(env): z轴课程独立触发 / split z-axis curriculum trigger
 - **[2026-03-10]** `git commit`: docs(docs): 归档旧文档并新增探索规划 / archive docs and add exploration plan
+- **[2026-03-12]** `git commit`: feat(motion): 新增回放脚本与姿态片段 / add replay script and pose clips
 
 ## Bug Fix
 

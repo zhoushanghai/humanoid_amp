@@ -57,3 +57,6 @@ python motions/data_convert.py \
 
 python motions/motion_viewer.py \
   --file motions/01_01_poses.npz
+
+python motions/motion_relpaly.py \
+  --motion motions/143_25_poses.npz
