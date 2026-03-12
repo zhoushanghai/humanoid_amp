@@ -1760,6 +1760,67 @@ cd ~/g1/humanoid_amp
 pip install -e .
 ```
 
+## Data Conversion
+
+- **Date**: 2026-03-12
+- **Action**: 将 `GMR` 数据集里的 `01_01_poses.csv` 转换为 Isaac Lab AMP 使用的 `npz` motion 文件。
+- **Details**:
+    - **输入文件**:
+        - `../../tool/GMR/dataset/01_01_poses.csv`
+    - **格式确认**:
+        - CSV 实测为 `687 x 36`
+        - 与 `motions/data_convert.py` 约定的 `root(7) + joints(29)` 格式一致，可直接转换
+    - **输出文件**:
+        - `motions/01_01_poses.npz`
+    - **转换结果**:
+        - `fps = 60`
+        - `dof_positions = (1373, 29)`
+        - `body_positions = (1373, 25, 3)`
+- **Execution Record**:
+```bash
+cd ~/g1/humanoid_amp
+conda activate g1_amp
+python motions/data_convert.py \
+  --csv ../../tool/GMR/dataset/01_01_poses.csv \
+  --urdf g1_model/urdf/g1_29dof_rev_1_0.urdf \
+  --meshes g1_model/urdf \
+  --output motions/01_01_poses.npz
+```
+
+## Motion Visualization
+
+- **Date**: 2026-03-12
+- **Action**: 验证 `motions/01_01_poses.npz` 的可视化与检查入口。
+- **Details**:
+    - **可用入口**:
+        - `motions/motion_viewer.py`: Matplotlib 3D 骨架动画
+        - `motions/verify_motion.py`: 终端打印 motion 内容摘要
+        - `motions/visualize_motion.py`: Plotly HTML 曲线可视化
+    - **验证结果**:
+        - `verify_motion.py` 成功读取 `motions/01_01_poses.npz`
+        - 文件信息：`fps = 60`，时长约 `22.88s`
+        - `visualize_motion.py` 当前环境失败，报错 `ModuleNotFoundError: No module named 'plotly'`
+    - **结论**:
+        - 当前环境下，最直接可用的是 `motion_viewer.py` 和 `verify_motion.py`
+        - 若需要交互式 HTML 曲线图，需要先补装 `plotly`
+- **Execution Record**:
+```bash
+cd ~/g1/humanoid_amp
+conda activate g1_amp
+
+# 终端检查 motion 内容
+python motions/verify_motion.py \
+  --file motions/01_01_poses.npz
+
+# Matplotlib 3D 骨架动画
+python motions/motion_viewer.py \
+  --file motions/01_01_poses.npz
+
+# Plotly HTML 曲线图（当前环境缺 plotly）
+python motions/visualize_motion.py \
+  --file motions/01_01_poses.npz
+```
+
 ## Feature Update
 
 - **Date**: 2026-03-11
@@ -2021,3 +2082,7 @@ python -m humanoid_amp.train \
   --max_iterations 1 \
   --headless
 ```
+
+## 2026-03-12 关键命令
+
+- **[2026-03-12]** `git commit`: docs(motion): 记录转换与可视化命令 / document motion workflow

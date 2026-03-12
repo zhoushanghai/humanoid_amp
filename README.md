@@ -43,3 +43,17 @@ python -m humanoid_amp.play \
   --video \
   --video_length 300
 ```
+
+
+
+cd ~/g1/humanoid_amp
+conda activate g1_amp
+python motions/data_convert.py \
+  --csv ../../tool/GMR/dataset/01_01_poses.csv \
+  --urdf g1_model/urdf/g1_29dof_rev_1_0.urdf \
+  --meshes g1_model/urdf \
+  --output motions/01_01_poses.npz
+
+
+python motions/motion_viewer.py \
+  --file motions/01_01_poses.npz
